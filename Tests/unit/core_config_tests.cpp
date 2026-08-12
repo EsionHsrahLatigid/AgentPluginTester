@@ -31,7 +31,7 @@ public:
             expectEquals(result.config.source.frequencyHz, 220.0);
             expect(! result.config.gui);
             expectEquals(result.config.runSeconds, 4.0);
-            expectEquals(result.config.reportPath.getFullPathName(), juce::String("/tmp/report.json"));
+            expectEquals(result.config.reportPath.getFullPathName(), juce::File("/tmp/report.json").getFullPathName());
         }
 
         beginTest("CLI plugin list replaces session plugins");
@@ -55,7 +55,7 @@ public:
 
             expect(result.validation.ok());
             expectEquals(result.config.plugins.size(), 1);
-            expectEquals(result.config.plugins[0].path.getFullPathName(), juce::String("/tmp/FromCli.vst3"));
+            expectEquals(result.config.plugins[0].path.getFullPathName(), juce::File("/tmp/FromCli.vst3").getFullPathName());
             expectEquals(result.config.audio.sampleRate, 48000.0);
         }
 
@@ -74,13 +74,14 @@ public:
             })json");
 
             const auto validation = HostConfigParser::mergeSessionJson(config, session, sessionFile);
+            const auto sessionDirectory = sessionFile.getParentDirectory();
             expect(validation.errors.isEmpty());
             expectEquals(validation.warnings.size(), 1);
-            expectEquals(config.source.inputFile.getFullPathName(), juce::String("/tmp/sessions/example/input.wav"));
-            expectEquals(config.plugins[0].path.getFullPathName(), juce::String("/tmp/sessions/example/Plugin.vst3"));
+            expectEquals(config.source.inputFile.getFullPathName(), sessionDirectory.getChildFile("input.wav").getFullPathName());
+            expectEquals(config.plugins[0].path.getFullPathName(), sessionDirectory.getChildFile("Plugin.vst3").getFullPathName());
             expect(config.plugins[0].bypass);
-            expectEquals(config.recordPath.getFullPathName(), juce::String("/tmp/sessions/example/output.wav"));
-            expectEquals(config.reportPath.getFullPathName(), juce::String("/tmp/sessions/example/report.json"));
+            expectEquals(config.recordPath.getFullPathName(), sessionDirectory.getChildFile("output.wav").getFullPathName());
+            expectEquals(config.reportPath.getFullPathName(), sessionDirectory.getChildFile("report.json").getFullPathName());
         }
 
         beginTest("Validation rejects invalid ranges and event order");

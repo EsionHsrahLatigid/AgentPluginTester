@@ -6,6 +6,20 @@ param(
 $ErrorActionPreference = "Stop"
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "agent-plugin-tester-downloader.$PID.$([Guid]::NewGuid().ToString('N'))"
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 try {
     $version = "v0.1.0"
     $releaseRoot = Join-Path $testRoot "releases"
@@ -18,7 +32,7 @@ try {
     $asset = Join-Path $releaseRoot "download\$version\$assetName"
     Compress-Archive -Path (Join-Path $payload "*") -DestinationPath $asset
     Set-Content (Join-Path $releaseRoot "latest\download\VERSION.txt") $version -Encoding Ascii
-    $assetHash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+    $assetHash = Get-Sha256 $asset
     Set-Content (Join-Path $releaseRoot "download\$version\SHA256SUMS.txt") "$assetHash  $assetName" -Encoding Ascii
 
     $cacheRoot = Join-Path $testRoot "cache"

@@ -73,6 +73,20 @@ function Get-ReleaseFile([string]$Source, [string]$Destination) {
     }
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
 if (-not $requestedVersion) {
     if (-not $update -and (Test-Path $currentVersionFile -PathType Leaf)) {
@@ -130,7 +144,7 @@ if (-not $cacheIsValid -or $reinstall) {
         if (@($checksumLine).Count -ne 1) { throw "Release checksum manifest has no unique valid entry for $assetName." }
         $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
         Get-ReleaseFile "$releaseUrl/$assetName" $archiveFile
-        $actualHash = (Get-FileHash $archiveFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualHash = Get-Sha256 $archiveFile
         if ($actualHash -ne $expectedHash) { throw "SHA-256 mismatch for $assetName. Expected $expectedHash, actual $actualHash." }
 
         $candidateInstall = Join-Path $workDir "install"
