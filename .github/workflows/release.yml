@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semantic-version tag to publish
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    name: Promote exact CI artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH: $TAG" >&2
+            exit 1
+          fi
+
+      - name: Checkout tagged source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Resolve immutable source revision
+        id: source
+        run: |
+          source_sha="$(git rev-list -n 1 "$TAG")"
+          project_version="$(sed -nE 's/^project\(AgentPluginHost VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          if [[ "v$project_version" != "$TAG" ]]; then
+            echo "CMake project version v$project_version does not match $TAG." >&2
+            exit 1
+          fi
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve successful exact-SHA CI run
+        id: ci
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          runs="$(gh api --paginate --slurp --method GET "repos/$REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch=main -f event=push -f status=success -f per_page=100)"
+          matches="$(jq --arg sha "$SOURCE_SHA" '[.[].workflow_runs[] | select(.head_sha == $sha)]' <<< "$runs")"
+          count="$(jq 'length' <<< "$matches")"
+          if [[ "$count" != 1 ]]; then
+            echo "Expected one successful main CI run for $SOURCE_SHA, found $count." >&2
+            exit 1
+          fi
+          run_id="$(jq -r '.[0].id' <<< "$matches")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve exact artifact IDs
+        id: artifacts
+        env:
+          RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          artifacts="$(gh api --method GET "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" -f per_page=100)"
+          mac_matches="$(jq '[.artifacts[] | select(.name == "AgentPluginHost-latest-macos-arm64" and .expired == false)]' <<< "$artifacts")"
+          win_matches="$(jq '[.artifacts[] | select(.name == "AgentPluginHost-latest-windows-x64" and .expired == false)]' <<< "$artifacts")"
+          if [[ "$(jq 'length' <<< "$mac_matches")" != 1 || "$(jq 'length' <<< "$win_matches")" != 1 ]]; then
+            echo "The exact CI run must contain one unexpired artifact for each release platform." >&2
+            exit 1
+          fi
+          echo "macos_id=$(jq -r '.[0].id' <<< "$mac_matches")" >> "$GITHUB_OUTPUT"
+          echo "windows_id=$(jq -r '.[0].id' <<< "$win_matches")" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact CI artifacts
+        env:
+          MACOS_ID: ${{ steps.artifacts.outputs.macos_id }}
+          WINDOWS_ID: ${{ steps.artifacts.outputs.windows_id }}
+        run: |
+          mkdir -p candidates/macos candidates/windows dist
+          gh api "repos/$REPOSITORY/actions/artifacts/$MACOS_ID/zip" > candidates/macos.zip
+          gh api "repos/$REPOSITORY/actions/artifacts/$WINDOWS_ID/zip" > candidates/windows.zip
+          unzip -q candidates/macos.zip -d candidates/macos
+          unzip -q candidates/windows.zip -d candidates/windows
+
+      - name: Verify and assemble release
+        run: |
+          cd candidates/macos
+          sha256sum -c SHA256SUMS.txt
+          cd ../windows
+          sha256sum -c SHA256SUMS.txt
+          cd ../..
+          cp candidates/macos/AgentPluginHost-macos-arm64.zip dist/
+          cp candidates/windows/AgentPluginHost-windows-x64.zip dist/
+          unzip -t dist/AgentPluginHost-macos-arm64.zip
+          unzip -t dist/AgentPluginHost-windows-x64.zip
+          cd dist
+          sha256sum AgentPluginHost-macos-arm64.zip AgentPluginHost-windows-x64.zip > SHA256SUMS.txt
+          printf '%s\n' "$TAG" > VERSION.txt
+          test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+
+      - name: Create or repair fail-closed draft release
+        run: |
+          assets=(
+            dist/AgentPluginHost-macos-arm64.zip
+            dist/AgentPluginHost-windows-x64.zip
+            dist/SHA256SUMS.txt
+            dist/VERSION.txt
+          )
+          if release="$(gh release view "$TAG" --json isDraft,assets 2>/dev/null)"; then
+            if [[ "$(jq -r '.isDraft' <<< "$release")" != true ]]; then
+              echo "Release $TAG is already published; refusing to replace it." >&2
+              exit 1
+            fi
+            unexpected="$(jq -r '[.assets[].name] - ["AgentPluginHost-macos-arm64.zip", "AgentPluginHost-windows-x64.zip", "SHA256SUMS.txt", "VERSION.txt"] | length' <<< "$release")"
+            if [[ "$unexpected" != 0 ]]; then
+              echo "Existing draft contains unexpected assets; refusing automatic repair." >&2
+              exit 1
+            fi
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "AgentPluginHost $TAG"
+          fi
+
+      - name: Verify exact release asset set
+        run: |
+          assets="$(gh release view "$TAG" --json assets --jq '[.assets[].name] | sort')"
+          expected='["AgentPluginHost-macos-arm64.zip","AgentPluginHost-windows-x64.zip","SHA256SUMS.txt","VERSION.txt"]'
+          if [[ "$assets" != "$expected" ]]; then
+            echo "Unexpected draft asset set: $assets" >&2
+            exit 1
+          fi
+
+      - name: Publish verified release
+        run: gh release edit "$TAG" --draft=false

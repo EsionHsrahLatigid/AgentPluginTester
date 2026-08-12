@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Plugin Tester"
+  short_description: "Build and run deterministic VST3 plugin tests"
+  default_prompt: "Use $use-agent-plugin-tester to validate this VST3 with the GUI and a JSON report."

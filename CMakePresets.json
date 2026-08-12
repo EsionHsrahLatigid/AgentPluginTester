@@ -1,0 +1,53 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "engine-debug",
+      "displayName": "Engine Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/engine-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "AGENTPLUGINHOST_BUILD_APP": "OFF",
+        "AGENTPLUGINHOST_BUILD_TESTS": "ON",
+        "AGENTPLUGINHOST_VERIFY_ARTIFACTS": "OFF"
+      }
+    },
+    {
+      "name": "host-release",
+      "displayName": "Host Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "AGENTPLUGINHOST_BUILD_APP": "ON",
+        "AGENTPLUGINHOST_BUILD_TESTS": "ON",
+        "AGENTPLUGINHOST_VERIFY_ARTIFACTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "engine-debug",
+      "configurePreset": "engine-debug",
+      "targets": [ "AgentPluginHostTests" ]
+    },
+    {
+      "name": "host-release",
+      "configurePreset": "host-release",
+      "targets": [ "ehl_stage_products", "AgentPluginHostTests" ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "engine-debug",
+      "configurePreset": "engine-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "host-release",
+      "configurePreset": "host-release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

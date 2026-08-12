@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    name: macOS arm64 host
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = arm64
+
+      - name: Configure
+        run: cmake --preset host-release
+
+      - name: Build and stage
+        run: cmake --build --preset host-release --parallel 3
+
+      - name: Test
+        run: ctest --preset host-release --output-on-failure
+
+      - name: Verify staged signatures
+        run: |
+          codesign --verify --deep --strict artifacts/host-release/macos-arm64/app/agent_plugin_host.app
+          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_gain.vst3
+          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_synth.vst3
+
+      - name: Package release asset
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc artifacts/host-release/macos-arm64 dist/AgentPluginHost-macos-arm64.zip
+          unzip -t dist/AgentPluginHost-macos-arm64.zip
+          cd dist
+          shasum -a 256 AgentPluginHost-macos-arm64.zip > SHA256SUMS.txt
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: AgentPluginHost-latest-macos-arm64
+          path: |
+            dist/AgentPluginHost-macos-arm64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-x64:
+    name: Windows x64 host
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build/host-release
+          -G "Visual Studio 17 2022" -A x64
+          -DAGENTPLUGINHOST_BUILD_APP=ON
+          -DAGENTPLUGINHOST_BUILD_TESTS=ON
+          -DAGENTPLUGINHOST_VERIFY_ARTIFACTS=ON
+
+      - name: Build and stage
+        run: cmake --build build/host-release --config Release --parallel 2 --target ehl_stage_products AgentPluginHostTests
+
+      - name: Test
+        run: ctest --test-dir build/host-release --build-config Release --output-on-failure
+
+      - name: Package release asset
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Compress-Archive -Path "artifacts/host-release/windows-x64/*" -DestinationPath "dist/AgentPluginHost-windows-x64.zip"
+          $null = Get-ChildItem "dist/AgentPluginHost-windows-x64.zip" | ForEach-Object { [IO.Compression.ZipFile]::OpenRead($_.FullName).Dispose() }
+          $hash = (Get-FileHash "dist/AgentPluginHost-windows-x64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content "dist/SHA256SUMS.txt" "$hash  AgentPluginHost-windows-x64.zip" -Encoding Ascii
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: AgentPluginHost-latest-windows-x64
+          path: |
+            dist/AgentPluginHost-windows-x64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  result:
+    name: CI result
+    if: always()
+    needs: [macos-arm64, windows-x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all release candidates
+        env:
+          MACOS_RESULT: ${{ needs.macos-arm64.result }}
+          WINDOWS_RESULT: ${{ needs.windows-x64.result }}
+        run: |
+          test "$MACOS_RESULT" = success
+          test "$WINDOWS_RESULT" = success

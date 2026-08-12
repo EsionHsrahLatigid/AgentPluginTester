@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository="${AGENT_PLUGIN_TESTER_REPOSITORY:-EsionHsrahLatigid/AgentPluginTester}"
+release_base="${AGENT_PLUGIN_TESTER_RELEASE_BASE_URL:-https://github.com/${repository}/releases}"
+requested_version="${AGENT_PLUGIN_TESTER_VERSION:-}"
+cache_root="${AGENT_PLUGIN_TESTER_CACHE_DIR:-}"
+offline="${AGENT_PLUGIN_TESTER_OFFLINE:-0}"
+update=0
+reinstall=0
+print_host_path=0
+install_only=0
+host_arguments=()
+
+usage() {
+  cat <<'EOF'
+Usage: agent-plugin-tester [resolver options] [--] [AgentPluginHost options]
+
+Resolver options:
+  --host-version <vX.Y.Z>  Use an exact release.
+  --update                 Check GitHub Latest before launching.
+  --reinstall              Re-download and replace the cached release.
+  --offline                Never access the network.
+  --cache-dir <path>       Override the user cache directory.
+  --print-host-path        Print the resolved executable and exit.
+  --install-only           Install/cache the host and exit.
+  --resolver-help          Show this help.
+
+Unknown options and all arguments after -- are passed to AgentPluginHost.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --host-version)
+      [[ $# -ge 2 ]] || { echo "--host-version requires a value" >&2; exit 2; }
+      requested_version="$2"
+      shift 2
+      ;;
+    --update) update=1; shift ;;
+    --reinstall) reinstall=1; shift ;;
+    --offline) offline=1; shift ;;
+    --cache-dir)
+      [[ $# -ge 2 ]] || { echo "--cache-dir requires a value" >&2; exit 2; }
+      cache_root="$2"
+      shift 2
+      ;;
+    --print-host-path) print_host_path=1; shift ;;
+    --install-only) install_only=1; shift ;;
+    --resolver-help) usage; exit 0 ;;
+    --)
+      shift
+      host_arguments+=("$@")
+      break
+      ;;
+    *)
+      host_arguments+=("$@")
+      break
+      ;;
+  esac
+done
+
+kernel="$(uname -s)"
+machine="$(uname -m)"
+case "${kernel}-${machine}" in
+  Darwin-arm64) platform="macos-arm64" ;;
+  *)
+    echo "Unsupported AgentPluginHost platform: ${kernel}-${machine}." >&2
+    echo "Release binaries are available for macos-arm64 and windows-x64." >&2
+    exit 2
+    ;;
+esac
+
+if [[ -z "$cache_root" ]]; then
+  if [[ "$kernel" == Darwin ]]; then
+    cache_root="${HOME}/Library/Caches/AgentPluginTester"
+  else
+    cache_root="${XDG_CACHE_HOME:-${HOME}/.cache}/agent-plugin-tester"
+  fi
+fi
+
+current_version_file="${cache_root}/current-version.txt"
+asset_name="AgentPluginHost-${platform}.zip"
+
+fetch_file() {
+  local source="$1"
+  local destination="$2"
+  if [[ "$source" == file://* ]]; then
+    cp "${source#file://}" "$destination"
+  elif [[ -f "$source" ]]; then
+    cp "$source" "$destination"
+  elif command -v curl >/dev/null 2>&1; then
+    curl --fail --location --silent --show-error --retry 3 --output "$destination" "$source"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --quiet --tries=3 --output-document="$destination" "$source"
+  else
+    echo "Downloading AgentPluginHost requires curl or wget." >&2
+    return 2
+  fi
+}
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{ print tolower($1) }'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{ print tolower($1) }'
+  else
+    echo "Verifying AgentPluginHost requires shasum or sha256sum." >&2
+    return 2
+  fi
+}
+
+mkdir -p "$cache_root"
+
+if [[ -z "$requested_version" ]]; then
+  if [[ "$update" -eq 0 && -s "$current_version_file" ]]; then
+    requested_version="$(tr -d '[:space:]' < "$current_version_file")"
+  elif [[ "$offline" == 1 ]]; then
+    echo "No cached AgentPluginHost version is selected; --offline cannot resolve GitHub Latest." >&2
+    exit 3
+  else
+    version_temp="$(mktemp "${cache_root}/version.XXXXXX")"
+    fetch_file "${release_base}/latest/download/VERSION.txt" "$version_temp"
+    requested_version="$(tr -d '[:space:]' < "$version_temp")"
+    rm -f "$version_temp"
+  fi
+fi
+
+if [[ ! "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid AgentPluginHost release version: ${requested_version}" >&2
+  exit 2
+fi
+
+release_dir="${cache_root}/releases/${requested_version}/${platform}"
+install_dir="${release_dir}/install"
+case "$platform" in
+  macos-arm64) relative_executable="app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost" ;;
+esac
+host_executable="${install_dir}/${relative_executable}"
+install_marker="${release_dir}/INSTALL.txt"
+
+cache_is_valid=0
+if [[ -x "$host_executable" && -s "$install_marker" ]]; then
+  marker_version="$(sed -n 's/^version=//p' "$install_marker")"
+  marker_platform="$(sed -n 's/^platform=//p' "$install_marker")"
+  if [[ "$marker_version" == "$requested_version" && "$marker_platform" == "$platform" ]]; then
+    cache_is_valid=1
+  fi
+fi
+
+if [[ "$cache_is_valid" -eq 0 || "$reinstall" -eq 1 ]]; then
+  if [[ "$offline" == 1 ]]; then
+    echo "AgentPluginHost ${requested_version} for ${platform} is not available in the offline cache." >&2
+    exit 3
+  fi
+  command -v unzip >/dev/null 2>&1 || { echo "Installing AgentPluginHost requires unzip." >&2; exit 2; }
+
+  mkdir -p "${cache_root}/releases/${requested_version}"
+  lock_dir="${release_dir}.lock"
+  lock_acquired=0
+  attempt=0
+  while [[ "$attempt" -lt 100 ]]; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      lock_acquired=1
+      break
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  [[ "$lock_acquired" -eq 1 ]] || { echo "Timed out waiting for the AgentPluginHost cache lock." >&2; exit 4; }
+
+  work_dir="$(mktemp -d "${cache_root}/releases/${requested_version}/install.XXXXXX")"
+  cleanup() {
+    rm -rf "${work_dir:-}"
+    rmdir "${lock_dir:-}" 2>/dev/null || true
+  }
+  trap cleanup EXIT
+
+  release_url="${release_base}/download/${requested_version}"
+  checksums_file="${work_dir}/SHA256SUMS.txt"
+  archive_file="${work_dir}/${asset_name}"
+  fetch_file "${release_url}/SHA256SUMS.txt" "$checksums_file"
+
+  expected_hash="$(awk -v name="$asset_name" '$2 == name { print tolower($1) }' "$checksums_file")"
+  if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "Release checksum manifest has no valid entry for ${asset_name}." >&2
+    exit 5
+  fi
+
+  fetch_file "${release_url}/${asset_name}" "$archive_file"
+  actual_hash="$(sha256_file "$archive_file")"
+  if [[ "$actual_hash" != "$expected_hash" ]]; then
+    echo "SHA-256 mismatch for ${asset_name}." >&2
+    echo "Expected: ${expected_hash}" >&2
+    echo "Actual:   ${actual_hash}" >&2
+    exit 5
+  fi
+
+  mkdir -p "${work_dir}/install"
+  unzip -q "$archive_file" -d "${work_dir}/install"
+  candidate="${work_dir}/install/${relative_executable}"
+  [[ -f "$candidate" ]] || { echo "Release archive is missing ${relative_executable}." >&2; exit 5; }
+  chmod +x "$candidate"
+  scanner="${work_dir}/install/scanner/agent_plugin_scanner"
+  [[ ! -f "$scanner" ]] || chmod +x "$scanner"
+  if [[ "$platform" == macos-arm64 ]] && command -v codesign >/dev/null 2>&1; then
+    codesign --verify --deep --strict "${work_dir}/install/app/agent_plugin_host.app"
+  fi
+
+  mkdir -p "$release_dir"
+  old_install="${release_dir}/install.old.$$"
+  if [[ -e "$install_dir" ]]; then mv "$install_dir" "$old_install"; fi
+  mv "${work_dir}/install" "$install_dir"
+  {
+    printf 'version=%s\n' "$requested_version"
+    printf 'platform=%s\n' "$platform"
+    printf 'asset=%s\n' "$asset_name"
+    printf 'sha256=%s\n' "$actual_hash"
+  } > "${release_dir}/INSTALL.txt.tmp"
+  mv "${release_dir}/INSTALL.txt.tmp" "$install_marker"
+  rm -rf "$old_install"
+  cache_is_valid=1
+fi
+
+current_temp="${current_version_file}.tmp.$$"
+printf '%s\n' "$requested_version" > "$current_temp"
+mv "$current_temp" "$current_version_file"
+
+if [[ "$print_host_path" -eq 1 ]]; then
+  printf '%s\n' "$host_executable"
+  exit 0
+fi
+if [[ "$install_only" -eq 1 ]]; then
+  printf 'AgentPluginHost %s cached for %s\n' "$requested_version" "$platform"
+  exit 0
+fi
+
+exec "$host_executable" "${host_arguments[@]}"
