@@ -220,6 +220,8 @@ if [[ "$cache_is_valid" -eq 0 || "$reinstall" -eq 1 ]]; then
   mv "${release_dir}/INSTALL.txt.tmp" "$install_marker"
   rm -rf "$old_install"
   cache_is_valid=1
+  cleanup
+  trap - EXIT
 fi
 
 current_temp="${current_version_file}.tmp.$$"

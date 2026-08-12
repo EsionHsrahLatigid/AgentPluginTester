@@ -42,6 +42,10 @@ resolved="$(AGENT_PLUGIN_TESTER_RELEASE_BASE_URL="$release_root" "$launcher" --c
 offline_resolved="$(AGENT_PLUGIN_TESTER_RELEASE_BASE_URL="${test_root}/missing" "$launcher" --cache-dir "$cache_root" --offline --print-host-path)"
 [[ "$offline_resolved" == "$resolved" ]]
 [[ "$(AGENT_PLUGIN_TESTER_RELEASE_BASE_URL="${test_root}/missing" "$launcher" --cache-dir "$cache_root" --offline -- --probe)" == "fixture-host --probe" ]]
+if find "${cache_root}/releases/${version}" -maxdepth 1 \( -name 'install.*' -o -name '*.lock' \) | grep -q .; then
+  echo "Downloader left temporary install or lock paths after execution." >&2
+  exit 1
+fi
 
 bad_release_root="${test_root}/bad-releases"
 mkdir -p "${bad_release_root}/download/${version}"
