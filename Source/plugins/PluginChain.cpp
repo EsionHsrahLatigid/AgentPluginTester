@@ -40,7 +40,10 @@ int PluginChain::addPlugin (std::unique_ptr<juce::AudioPluginInstance> instance,
     slot->bypassed.store (initiallyBypassed, std::memory_order_release);
 
     if (prepared)
+    {
         slot->instance->prepareToPlay (preparedSpec.sampleRate, preparedSpec.maximumBlockSize);
+        slot->metadata.reportedLatencySamples = slot->instance->getLatencySamples();
+    }
 
     slots.push_back (std::move (slot));
     return size() - 1;
@@ -119,6 +122,15 @@ std::unique_ptr<juce::AudioProcessorEditor> PluginChain::createEditorForSlot (in
     return {};
 }
 
+void PluginChain::refreshMetadataFromInstances() noexcept
+{
+    for (auto& slot : slots)
+    {
+        if (slot->instance != nullptr)
+            slot->metadata.reportedLatencySamples = slot->instance->getLatencySamples();
+    }
+}
+
 void PluginChain::prepareToPlay (double sampleRate, int maximumBlockSize, int channels)
 {
     preparedSpec.sampleRate = sampleRate;
@@ -128,7 +140,10 @@ void PluginChain::prepareToPlay (double sampleRate, int maximumBlockSize, int ch
     for (auto& slot : slots)
     {
         if (slot->instance != nullptr)
+        {
             slot->instance->prepareToPlay (sampleRate, maximumBlockSize);
+            slot->metadata.reportedLatencySamples = slot->instance->getLatencySamples();
+        }
     }
 
     prepared = true;

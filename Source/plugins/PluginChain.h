@@ -54,6 +54,7 @@ public:
 
     std::unique_ptr<juce::AudioProcessorEditor> createEditorForSlot (int index);
 
+    void refreshMetadataFromInstances() noexcept;
     void prepareToPlay (double sampleRate, int maximumBlockSize, int channels);
     void releaseResources();
     void reset();

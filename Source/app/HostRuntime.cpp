@@ -220,6 +220,7 @@ juce::Result HostRuntime::prepareEngines (double sampleRate, int blockSize, int 
     agentpluginhost::midi::MidiScheduler::prepareMidiBuffer (realtimeMidi, midiScheduler.capacity());
     transport.prepare (sampleRate, blockSize);
     pluginChain.prepareToPlay (sampleRate, blockSize, channels);
+    refreshPluginReportLatencies();
     for (int i = 0; i < pluginChain.size(); ++i)
         if (auto* slot = pluginChain.getSlot (i); slot != nullptr && slot->instance != nullptr)
             slot->instance->setPlayHead (&transport);
@@ -399,6 +400,8 @@ void HostRuntime::panic()
 void HostRuntime::finaliseReport (ExitCode code)
 {
     exitCode = code;
+    pluginChain.refreshMetadataFromInstances();
+    refreshPluginReportLatencies();
     report.completedAt = Report::timestampNowUtc();
     report.durationSeconds = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - startedTicks);
     report.addMeasurement (measurementFor ("input", inputTap.snapshot()));
@@ -448,6 +451,16 @@ void HostRuntime::finaliseReport (ExitCode code)
     report.exitCode = exitCode;
     report.passed = exitCode == ExitCode::success;
     writeReport();
+}
+
+void HostRuntime::refreshPluginReportLatencies()
+{
+    for (int i = 0; i < report.plugins.size(); ++i)
+    {
+        auto& plugin = report.plugins.getReference (i);
+        if (const auto* slot = pluginChain.getSlot (plugin.index))
+            plugin.latencySamples = slot->metadata.reportedLatencySamples;
+    }
 }
 
 void HostRuntime::writeReport()

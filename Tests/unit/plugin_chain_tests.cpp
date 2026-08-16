@@ -8,7 +8,11 @@ namespace agent_plugin_host::plugins::tests
 class GainProcessor final : public juce::AudioPluginInstance
 {
 public:
-    explicit GainProcessor (float gainToApply) : gain (gainToApply) {}
+    explicit GainProcessor (float gainToApply, int latencyToReportAfterPrepare = 0)
+        : gain (gainToApply),
+          preparedLatencySamples (latencyToReportAfterPrepare)
+    {
+    }
 
     const juce::String getName() const override { return "GainProcessor"; }
     void fillInPluginDescription (juce::PluginDescription& description) const override
@@ -22,7 +26,7 @@ public:
         description.numOutputChannels = getTotalNumOutputChannels();
     }
 
-    void prepareToPlay (double, int) override {}
+    void prepareToPlay (double, int) override { setLatencySamples (preparedLatencySamples); }
     void releaseResources() override {}
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (gain); }
     void processBlock (juce::AudioBuffer<double>& buffer, juce::MidiBuffer&) override { buffer.applyGain (static_cast<double> (gain)); }
@@ -41,6 +45,7 @@ public:
 
 private:
     float gain = 1.0f;
+    int preparedLatencySamples = 0;
 };
 
 class PluginChainUnitTests final : public juce::UnitTest
@@ -88,6 +93,18 @@ public:
             expectWithinAbsoluteError (buffer.getSample (0, 0), 0.25f, 0.000001f);
             expectWithinAbsoluteError (buffer.getSample (1, 0), -0.25f, 0.000001f);
             expectEquals (midi.getNumEvents(), 1);
+        }
+
+        beginTest ("metadata latency refreshes after prepareToPlay");
+        {
+            PluginChain chain;
+            chain.addPlugin (std::make_unique<GainProcessor> (1.0f, 137), makeMetadata ("latency"));
+
+            expectEquals (chain.getMetadataSnapshot()[0].reportedLatencySamples, 0);
+
+            chain.prepareToPlay (48000.0, 64, 2);
+
+            expectEquals (chain.getMetadataSnapshot()[0].reportedLatencySamples, 137);
         }
     }
 

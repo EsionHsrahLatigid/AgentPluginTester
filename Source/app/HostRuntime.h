@@ -83,6 +83,7 @@ private:
     juce::Result loadPlugins();
     void scheduleSessionEvents();
     void finaliseReport (ExitCode);
+    void refreshPluginReportLatencies();
     void emit (const juce::String& event, const juce::var& payload = {}) const;
     void setState (State);
     agentpluginhost::ui::HostUiState makeUiState() const;
