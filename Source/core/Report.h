@@ -84,7 +84,7 @@ class Report
 {
 public:
     juce::String schemaVersion = "1.0";
-    juce::String hostVersion = "0.1.0";
+    juce::String hostVersion = APH_VERSION;
     juce::var platform;
     HostConfig configuration;
     juce::Array<PluginReport> plugins;

@@ -60,6 +60,28 @@ public:
         auto* generic = dynamic_cast<juce::Button*> (component.findChildWithID ("plugin.0.editor.generic"));
         expect (native != nullptr && native->getButtonText().containsIgnoreCase ("GUI"));
         expect (generic != nullptr && generic->getButtonText().containsIgnoreCase ("PARAM"));
+
+        beginTest ("drag and drop forwards only unique VST3 paths");
+        juce::StringArray receivedPaths;
+        HostUiActions dropActions;
+        dropActions.addPlugins = [&receivedPaths] (const juce::StringArray& paths) { receivedPaths = paths; };
+        component.setActions (std::move (dropActions));
+
+        const juce::StringArray offeredPaths {
+            "/tmp/First.vst3",
+            "/tmp/readme.txt",
+            "/tmp/First.vst3",
+            "/tmp/Second.VST3"
+        };
+        expect (component.isInterestedInFileDrag (offeredPaths));
+        expect (! component.isInterestedInFileDrag ({ "/tmp/readme.txt" }));
+        component.filesDropped (offeredPaths, 10, 10);
+        expectEquals (receivedPaths.size(), 2);
+        expect (receivedPaths[0].endsWithIgnoreCase ("First.vst3"));
+        expect (receivedPaths[1].endsWithIgnoreCase ("Second.VST3"));
+
+        beginTest ("plugin menu command remains stable for automation");
+        expectEquals (HostMainWindow::addVst3MenuItemId, 1);
     }
 };
 

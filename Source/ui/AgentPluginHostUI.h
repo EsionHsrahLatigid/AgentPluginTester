@@ -76,6 +76,7 @@ struct HostUiState
 
 struct HostUiActions
 {
+    std::function<void(const juce::StringArray&)> addPlugins;
     std::function<void()> play;
     std::function<void()> stop;
     std::function<void()> panic;
@@ -103,6 +104,7 @@ private:
 };
 
 class HostMainComponent final : public juce::Component,
+                                public juce::FileDragAndDropTarget,
                                 private juce::Button::Listener,
                                 private juce::Timer
 {
@@ -120,12 +122,19 @@ public:
     void setActions (HostUiActions newActions);
     void setState (HostUiState newState);
     const HostUiState& getState() const noexcept;
+    static bool isSupportedPluginPath (const juce::String& path);
+    static juce::StringArray supportedPluginPaths (const juce::StringArray& paths);
+    void requestPluginLoad (const juce::StringArray& paths);
 
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override;
+    void fileDragExit (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray&, int, int) override;
 
 private:
     static constexpr int grid = 4;
@@ -177,6 +186,7 @@ private:
     std::array<juce::Rectangle<int>, midiKeyCount> midiKeyBounds {};
     std::array<bool, midiKeyCount> heldNoteKeys {};
     int mouseHeldNote = -1;
+    bool pluginDragActive = false;
 
     juce::Rectangle<int> headerBounds;
     juce::Rectangle<int> sourceBounds;
@@ -191,15 +201,27 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostMainComponent)
 };
 
-class HostMainWindow final : public juce::DocumentWindow
+class HostMainWindow final : public juce::DocumentWindow,
+                             private juce::MenuBarModel
 {
 public:
+    static constexpr int addVst3MenuItemId = 1;
+
     HostMainWindow (juce::String name, HostUiActions actions, HostUiState initialState);
+    ~HostMainWindow() override;
 
     HostMainComponent& getHostComponent() noexcept;
     void closeButtonPressed() override;
 
 private:
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex (int topLevelMenuIndex, const juce::String& menuName) override;
+    void menuItemSelected (int menuItemId, int topLevelMenuIndex) override;
+    void showPluginChooser();
+
+    juce::LookAndFeel_V4 menuLookAndFeel;
+    std::unique_ptr<juce::FileChooser> pluginChooser;
+    juce::File lastPluginDirectory;
     HostMainComponent* hostComponent = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostMainWindow)

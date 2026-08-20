@@ -51,6 +51,10 @@ AgentPluginHost --list-devices
 AgentPluginHost --inspect-plugin /path/to/plugin.vst3
 ```
 
+For interactive use, launch the app with no `--plugin` argument, then use `PLUGIN > ADD VST3...` to select one or more VST3 bundles. You can also drag `.vst3` bundles from Finder or Explorer onto the main console. Each selection is appended to the current chain; a bundle containing multiple plug-in classes adds all detected classes in scan order. During a realtime addition, the host briefly detaches its audio callback, updates the prepared chain, and resumes without resetting the source, transport, analysis, or capture state.
+
+Each loaded row exposes `GUI` for the native plug-in editor (with generic fallback) and `PARAMS` for the generic parameter editor.
+
 The complete behavior contract is in [AGENT_PLUGIN_TEST_HOST_SPEC.md](AGENT_PLUGIN_TEST_HOST_SPEC.md). The EHL visual and interaction contract is in [DESIGN.md](DESIGN.md).
 
 ## Release binaries
@@ -76,7 +80,7 @@ Install the published skill with:
 npx skills add EsionHsrahLatigid/AgentPluginTester --skill use-agent-plugin-tester -g -a codex -y
 ```
 
-The launchers use GitHub Latest by default. Use `--host-version v0.1.0` for an exact release, `--update` to refresh the selected version, and `--offline` to prohibit downloads. macOS caches under `~/Library/Caches/AgentPluginTester`; Windows caches under `%LOCALAPPDATA%\AgentPluginTester\Cache`.
+The launchers use GitHub Latest by default. Use `--host-version v0.2.0` for an exact release, `--update` to refresh the selected version, and `--offline` to prohibit downloads. macOS caches under `~/Library/Caches/AgentPluginTester`; Windows caches under `%LOCALAPPDATA%\AgentPluginTester\Cache`.
 
 ## License
 

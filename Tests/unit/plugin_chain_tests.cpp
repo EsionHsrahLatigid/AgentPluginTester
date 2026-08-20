@@ -106,6 +106,24 @@ public:
 
             expectEquals (chain.getMetadataSnapshot()[0].reportedLatencySamples, 137);
         }
+
+        beginTest ("plugins added to a prepared chain are ready on the next block");
+        {
+            PluginChain chain;
+            chain.addPlugin (std::make_unique<GainProcessor> (2.0f), makeMetadata ("first"));
+            chain.prepareToPlay (48000.0, 64, 2);
+            chain.addPlugin (std::make_unique<GainProcessor> (3.0f), makeMetadata ("added"));
+
+            juce::AudioBuffer<float> buffer (2, 16);
+            buffer.clear();
+            buffer.setSample (0, 0, 0.25f);
+            juce::MidiBuffer midi;
+            chain.processBlock (buffer, midi);
+
+            expectWithinAbsoluteError (buffer.getSample (0, 0), 1.5f, 0.000001f);
+            expect (chain.isPrepared());
+            expectEquals (chain.size(), 2);
+        }
     }
 
 private:

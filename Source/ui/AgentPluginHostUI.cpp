@@ -125,6 +125,27 @@ void HostMainComponent::setState (HostUiState newState)
     repaint();
 }
 
+bool HostMainComponent::isSupportedPluginPath (const juce::String& path)
+{
+    return juce::File (path).hasFileExtension (".vst3");
+}
+
+juce::StringArray HostMainComponent::supportedPluginPaths (const juce::StringArray& paths)
+{
+    juce::StringArray supported;
+    for (const auto& path : paths)
+        if (isSupportedPluginPath (path))
+            supported.addIfNotAlreadyThere (juce::File (path).getFullPathName());
+    return supported;
+}
+
+void HostMainComponent::requestPluginLoad (const juce::StringArray& paths)
+{
+    const auto supported = supportedPluginPaths (paths);
+    if (! supported.isEmpty() && actions.addPlugins)
+        actions.addPlugins (supported);
+}
+
 const HostUiState& HostMainComponent::getState() const noexcept
 {
     return state;
@@ -157,7 +178,8 @@ void HostMainComponent::paint (juce::Graphics& g)
     {
         g.setColour (mid);
         g.setFont (makeFont (11.0f));
-        g.drawFittedText ("NO VST3 LOADED\nADD --plugin <path> OR LOAD A SESSION", chainBounds.reduced (16).withTrimmedTop (24), juce::Justification::centred, 2);
+        g.drawFittedText ("NO VST3 LOADED\nDROP .VST3 HERE  /  PLUGIN > ADD VST3...",
+                          chainBounds.reduced (16).withTrimmedTop (24), juce::Justification::centred, 2);
     }
 
     drawSection (g, meterBounds, "METERS");
@@ -192,6 +214,17 @@ void HostMainComponent::paint (juce::Graphics& g)
         drawDitherWarning (g, statusBounds.reduced (2));
 
     drawMidiKeyboard (g);
+
+    if (pluginDragActive)
+    {
+        auto overlay = getLocalBounds().reduced (16);
+        g.setColour (ink.withAlpha (0.92f));
+        g.fillRect (overlay);
+        strokeRect (g, overlay, paper, 4);
+        g.setColour (paper);
+        g.setFont (makeFont (22.0f, juce::Font::bold));
+        g.drawFittedText ("DROP VST3 TO ADD TO CHAIN", overlay.reduced (24), juce::Justification::centred, 1);
+    }
 }
 
 void HostMainComponent::resized()
@@ -337,6 +370,30 @@ void HostMainComponent::mouseUp (const juce::MouseEvent&)
     heldNoteKeys[static_cast<size_t> (note - 60)] = false;
     if (actions.noteOff) actions.noteOff (note, 0.0f);
     repaint (midiBounds);
+}
+
+bool HostMainComponent::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    return ! supportedPluginPaths (files).isEmpty();
+}
+
+void HostMainComponent::fileDragEnter (const juce::StringArray& files, int, int)
+{
+    pluginDragActive = isInterestedInFileDrag (files);
+    repaint();
+}
+
+void HostMainComponent::fileDragExit (const juce::StringArray&)
+{
+    pluginDragActive = false;
+    repaint();
+}
+
+void HostMainComponent::filesDropped (const juce::StringArray& files, int, int)
+{
+    pluginDragActive = false;
+    requestPluginLoad (files);
+    repaint();
 }
 
 int HostMainComponent::noteForKeyCode (int keyCode) noexcept
@@ -620,6 +677,12 @@ float HostMainComponent::meterNormalised (float db)
 HostMainWindow::HostMainWindow (juce::String name, HostUiActions actions, HostUiState initialState)
     : juce::DocumentWindow (name, ink, juce::DocumentWindow::allButtons)
 {
+    menuLookAndFeel.setColour (juce::PopupMenu::backgroundColourId, ink);
+    menuLookAndFeel.setColour (juce::PopupMenu::textColourId, paper);
+    menuLookAndFeel.setColour (juce::PopupMenu::headerTextColourId, mid);
+    menuLookAndFeel.setColour (juce::PopupMenu::highlightedBackgroundColourId, paper);
+    menuLookAndFeel.setColour (juce::PopupMenu::highlightedTextColourId, ink);
+    setLookAndFeel (&menuLookAndFeel);
     setUsingNativeTitleBar (true);
     setResizable (true, false);
     setResizeLimits (HostMainComponent::minimumWidth, HostMainComponent::minimumHeight,
@@ -630,9 +693,17 @@ HostMainWindow::HostMainWindow (juce::String name, HostUiActions actions, HostUi
     hostComponent->setActions (std::move (actions));
     hostComponent->setState (std::move (initialState));
     setContentOwned (component.release(), true);
+    setMenuBar (this, 28);
     centreWithSize (HostMainComponent::defaultWidth, HostMainComponent::defaultHeight);
     setVisible (true);
     hostComponent->grabKeyboardFocus();
+}
+
+HostMainWindow::~HostMainWindow()
+{
+    pluginChooser.reset();
+    setMenuBar (nullptr);
+    setLookAndFeel (nullptr);
 }
 
 HostMainComponent& HostMainWindow::getHostComponent() noexcept
@@ -643,6 +714,64 @@ HostMainComponent& HostMainWindow::getHostComponent() noexcept
 void HostMainWindow::closeButtonPressed()
 {
     setVisible (false);
+}
+
+juce::StringArray HostMainWindow::getMenuBarNames()
+{
+    return { "PLUGIN" };
+}
+
+juce::PopupMenu HostMainWindow::getMenuForIndex (int topLevelMenuIndex, const juce::String&)
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&menuLookAndFeel);
+    if (topLevelMenuIndex == 0)
+        menu.addItem (addVst3MenuItemId, "ADD VST3...");
+    return menu;
+}
+
+void HostMainWindow::menuItemSelected (int menuItemId, int)
+{
+    if (menuItemId == addVst3MenuItemId)
+        showPluginChooser();
+}
+
+void HostMainWindow::showPluginChooser()
+{
+    if (pluginChooser != nullptr)
+        return;
+
+    if (lastPluginDirectory == juce::File())
+        lastPluginDirectory = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+
+    pluginChooser = std::make_unique<juce::FileChooser> (
+        "ADD VST3 PLUG-INS", lastPluginDirectory, "*.vst3", true, false, this);
+
+    constexpr auto flags = juce::FileBrowserComponent::openMode
+                         | juce::FileBrowserComponent::canSelectFiles
+                         | juce::FileBrowserComponent::canSelectDirectories
+                         | juce::FileBrowserComponent::canSelectMultipleItems;
+    juce::Component::SafePointer<HostMainWindow> safeThis (this);
+    pluginChooser->launchAsync (flags, [safeThis] (const juce::FileChooser& chooser)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        const auto results = chooser.getResults();
+        juce::StringArray paths;
+        for (const auto& result : results)
+            paths.add (result.getFullPathName());
+
+        if (! results.isEmpty())
+            safeThis->lastPluginDirectory = results.getFirst().getParentDirectory();
+
+        safeThis->hostComponent->requestPluginLoad (paths);
+        juce::MessageManager::callAsync ([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->pluginChooser.reset();
+        });
+    });
 }
 
 } // namespace agentpluginhost::ui

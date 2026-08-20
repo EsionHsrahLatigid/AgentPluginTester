@@ -27,7 +27,7 @@ Resolver controls:
 <skill-directory>/scripts/agent-plugin-tester --update --version
 
 # Pin a reproducible release or require an existing offline cache
-<skill-directory>/scripts/agent-plugin-tester --host-version v0.1.0 --offline --version
+<skill-directory>/scripts/agent-plugin-tester --host-version v0.2.0 --offline --version
 
 # Print the real executable path
 <skill-directory>/scripts/agent-plugin-tester --print-host-path
@@ -122,6 +122,9 @@ Run with `--gui`. Use `--show-editors` to open every loaded plugin GUI after sta
 
 In the host window:
 
+- use `PLUGIN > ADD VST3...` to select and append one or more VST3 bundles after launch;
+- drag `.vst3` bundles from Finder or Explorer onto the main console to append them to the current chain;
+- expect a bundle containing multiple plug-in classes to append all detected classes in scan order when loaded from the GUI;
 - use `GUI` on a plugin row to open its native editor in a separate window;
 - expect `GUI` to fall back to the generic parameter editor when the plugin has no native editor;
 - use `PARAMS` to explicitly open the generic JUCE parameter editor;

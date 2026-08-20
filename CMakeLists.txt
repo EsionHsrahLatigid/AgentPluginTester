@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(AgentPluginHost VERSION 0.1.0 LANGUAGES C CXX)
+project(AgentPluginHost VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -116,8 +116,10 @@ if(AGENTPLUGINHOST_BUILD_TESTS)
     target_sources(AgentPluginHostTests PRIVATE
         Tests/TestMain.cpp
         ${AGENTPLUGINHOST_TEST_SOURCES}
+        Source/app/HostRuntime.cpp
         Source/ui/AgentPluginHostUI.cpp)
     target_include_directories(AgentPluginHostTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+    target_compile_definitions(AgentPluginHostTests PRIVATE APH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(AgentPluginHostTests PRIVATE AgentPluginHost::Core juce::juce_gui_basics juce::juce_gui_extra)
     agentpluginhost_set_common_target_options(AgentPluginHostTests)
     add_test(NAME AgentPluginHostTests COMMAND AgentPluginHostTests)

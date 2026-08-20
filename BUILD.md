@@ -34,4 +34,4 @@ A published release contains exactly:
 - `SHA256SUMS.txt`
 - `VERSION.txt`
 
-To publish a release, update the CMake project version, land the commit on `main`, wait for CI to pass, then push the matching tag (for example `v0.1.0`).
+To publish a release, update the CMake project version, land the commit on `main`, wait for CI to pass, then push the matching tag (for example `v0.2.0`).

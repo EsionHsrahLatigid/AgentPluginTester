@@ -168,26 +168,118 @@ juce::Result HostRuntime::loadPlugins()
         if (selected == nullptr)
             return juce::Result::fail ("VST3 contains multiple classes; specify classId for " + specification.path.getFullPathName());
 
-        auto loaded = pluginLoader.createInstanceBlocking (*selected, 48000.0, 256, index);
-        if (! loaded.succeeded())
-            return juce::Result::fail (loaded.error);
-
-        PluginReport pluginReport;
-        pluginReport.index = index;
-        pluginReport.uuid = loaded.metadata.runtimeId;
-        pluginReport.path = specification.path.getFullPathName();
-        pluginReport.name = loaded.metadata.name;
-        pluginReport.vendor = loaded.metadata.manufacturerName;
-        pluginReport.version = loaded.metadata.version;
-        pluginReport.latencySamples = loaded.metadata.reportedLatencySamples;
-        pluginReport.loaded = true;
-        pluginReport.bypass = specification.bypass;
-        report.plugins.add (pluginReport);
-
-        pluginChain.addPlugin (std::move (loaded.instance), std::move (loaded.metadata), specification.bypass);
-        emit ("plugin_loaded", objectWith ("index", index));
+        if (const auto added = addPluginClass (specification.path, *selected, specification.bypass); added.failed())
+            return added;
     }
     return juce::Result::ok();
+}
+
+juce::Result HostRuntime::addPluginClass (const juce::File& path,
+                                          const juce::PluginDescription& description,
+                                          bool bypassed)
+{
+    const auto index = pluginChain.size();
+    auto loaded = pluginLoader.createInstanceBlocking (description, activeSampleRate, activeBlockSize, index);
+    if (! loaded.succeeded())
+        return juce::Result::fail (loaded.error);
+
+    PluginReport pluginReport;
+    pluginReport.index = index;
+    pluginReport.uuid = loaded.metadata.runtimeId;
+    pluginReport.path = path.getFullPathName();
+    pluginReport.name = loaded.metadata.name;
+    pluginReport.vendor = loaded.metadata.manufacturerName;
+    pluginReport.version = loaded.metadata.version;
+    pluginReport.latencySamples = loaded.metadata.reportedLatencySamples;
+    pluginReport.loaded = true;
+    pluginReport.bypass = bypassed;
+    report.plugins.add (pluginReport);
+
+    const auto addedIndex = pluginChain.addPlugin (std::move (loaded.instance), std::move (loaded.metadata), bypassed);
+    if (auto* slot = pluginChain.getSlot (addedIndex); slot != nullptr && slot->instance != nullptr)
+        slot->instance->setPlayHead (&transport);
+
+    refreshPluginReportLatencies();
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("index", addedIndex);
+    payload->setProperty ("name", description.name);
+    emit ("plugin_loaded", juce::var (payload));
+    return juce::Result::ok();
+}
+
+void HostRuntime::addPlugins (const juce::StringArray& paths)
+{
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+    if (paths.isEmpty())
+        return;
+
+    if (state != State::ready && state != State::running)
+    {
+        lastUiStatus = "PLUGIN LOAD UNAVAILABLE WHILE " + stateName (state).toUpperCase();
+        if (ui != nullptr) ui->setState (makeUiState());
+        return;
+    }
+
+    const auto shouldResumeAudio = state == State::running && deviceManager.getCurrentAudioDevice() != nullptr;
+    if (shouldResumeAudio)
+    {
+        suspendingForPluginLoad = true;
+        deviceManager.removeAudioCallback (this);
+    }
+
+    int addedCount = 0;
+    int failedCount = 0;
+    for (const auto& pathText : paths)
+    {
+        const juce::File path (pathText);
+        auto scan = pluginLoader.scanSinglePluginFile (path);
+        if (! scan.succeeded())
+        {
+            ++failedCount;
+            report.addError ("plugins", scan.error);
+            emit ("plugin_load_failed", objectWith ("message", scan.error));
+            continue;
+        }
+
+        for (const auto* description : scan.descriptions)
+        {
+            if (description == nullptr)
+                continue;
+
+            if (const auto added = addPluginClass (path, *description, false); added.failed())
+            {
+                ++failedCount;
+                const auto message = "Cannot load " + description->name + ": " + added.getErrorMessage();
+                report.addError ("plugins", message);
+                emit ("plugin_load_failed", objectWith ("message", message));
+                continue;
+            }
+
+            PluginConfig plugin;
+            plugin.path = path;
+            plugin.classId = description->createIdentifierString();
+            config.plugins.add (plugin);
+            ++addedCount;
+        }
+    }
+
+    report.configuration = config;
+    if (shouldResumeAudio)
+    {
+        deviceManager.addAudioCallback (this);
+        suspendingForPluginLoad = false;
+    }
+
+    if (addedCount > 0)
+        lastUiStatus = juce::String (addedCount) + (addedCount == 1 ? " PLUGIN ADDED" : " PLUGINS ADDED");
+    else
+        lastUiStatus.clear();
+    if (failedCount > 0)
+        lastUiStatus += (lastUiStatus.isNotEmpty() ? " / " : "")
+                      + juce::String (failedCount) + (failedCount == 1 ? " LOAD FAILED" : " LOADS FAILED");
+
+    if (ui != nullptr)
+        ui->setState (makeUiState());
 }
 
 juce::Result HostRuntime::prepareEngines (double sampleRate, int blockSize, int channels)
@@ -358,6 +450,9 @@ void HostRuntime::audioDeviceIOCallbackWithContext (const float* const* input, i
 
 void HostRuntime::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
+    if (suspendingForPluginLoad)
+        return;
+
     const auto result = prepareEngines (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(),
                                         juce::jmax (1, config.audio.outputChannels));
     if (result.failed()) report.addError ("audioDevice", result.getErrorMessage());
@@ -365,7 +460,8 @@ void HostRuntime::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
 void HostRuntime::audioDeviceStopped()
 {
-    pluginChain.releaseResources();
+    if (! suspendingForPluginLoad)
+        pluginChain.releaseResources();
 }
 
 void HostRuntime::timerCallback()
@@ -485,6 +581,7 @@ void HostRuntime::emit (const juce::String& event, const juce::var& payload) con
 void HostRuntime::setState (State newState)
 {
     state = newState;
+    lastUiStatus = stateName (state);
     TimelineEvent event { "state_changed", Report::timestampNowUtc(), objectWith ("state", stateName (state)) };
     report.timeline.add (event);
     emit ("state_changed", event.payload);
@@ -515,7 +612,7 @@ agentpluginhost::ui::HostUiState HostRuntime::makeUiState() const
     value.passed = report.passed;
     value.errorCount = report.errors.size();
     value.warningCount = report.warnings.size();
-    value.lastStatus = stateName (state);
+    value.lastStatus = lastUiStatus;
     const auto output = outputTap.snapshot();
     value.outputMeter.peakDbfs = output.peakDbfs;
     value.outputMeter.rmsDbfs = output.rmsDbfs;
@@ -552,6 +649,7 @@ agentpluginhost::ui::HostUiState HostRuntime::makeUiState() const
 agentpluginhost::ui::HostUiActions HostRuntime::makeUiActions()
 {
     agentpluginhost::ui::HostUiActions actions;
+    actions.addPlugins = [this] (const juce::StringArray& paths) { addPlugins (paths); };
     actions.play = [this] { transport.setPlaying (true); };
     actions.stop = [this] { transport.setPlaying (false); };
     actions.panic = [this] { panic(); };

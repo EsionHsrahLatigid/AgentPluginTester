@@ -6,7 +6,7 @@ namespace aph
 {
 namespace
 {
-constexpr const char* hostVersion = "0.1.0";
+constexpr const char* hostVersion = APH_VERSION;
 
 juce::var makeObject()
 {
@@ -763,7 +763,7 @@ ValidationResult HostConfigParser::validate(const HostConfig& config)
 
 juce::String HostConfigParser::getHelpText()
 {
-    return "AgentPluginHost 0.1.0\n"
+    return "AgentPluginHost " APH_VERSION "\n"
            "Usage: AgentPluginHost [global-options] --plugin <path> [--plugin <path> ...]\n\n"
            "Options:\n"
            "  --plugin <path>                 Add VST3 to the serial chain; repeatable.\n"

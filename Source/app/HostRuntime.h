@@ -39,11 +39,13 @@ public:
     void stop (ExitCode requestedCode = ExitCode::success);
     void panic();
     void writeReport();
+    void addPlugins (const juce::StringArray& paths);
 
     State getState() const noexcept { return state; }
     ExitCode getExitCode() const noexcept { return exitCode; }
     const HostConfig& getConfig() const noexcept { return config; }
     Report& getReport() noexcept { return report; }
+    int getPluginCount() const noexcept { return pluginChain.size(); }
 
 private:
     class PreloadedAudioFile final : public agent_plugin_host::audio::SourceEngine::FileSource
@@ -81,6 +83,7 @@ private:
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) noexcept;
     juce::Result prepareEngines (double sampleRate, int blockSize, int channels);
     juce::Result loadPlugins();
+    juce::Result addPluginClass (const juce::File&, const juce::PluginDescription&, bool bypassed);
     void scheduleSessionEvents();
     void finaliseReport (ExitCode);
     void refreshPluginReportLatencies();
@@ -114,6 +117,8 @@ private:
     std::atomic<int> activeSourceType { static_cast<int> (InputSourceType::silence) };
     std::atomic<float> activeSourceLevelDb { -18.0f };
     std::atomic<float> activeSourceFrequencyHz { 440.0f };
+    bool suspendingForPluginLoad = false;
+    juce::String lastUiStatus = "starting";
 
     agent_plugin_host::audio::SourceEngine source;
     agent_plugin_host::audio::AnalysisTap inputTap, outputTap;
