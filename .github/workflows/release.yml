@@ -307,8 +307,10 @@ jobs:
           done
           verify_signature "$helper"
           verify_signature "$scanner"
+          # Gatekeeper assesses the distributable app bundle. The scanner is
+          # signed nested code inside that app; raw helper binaries are not apps
+          # and spctl rejects them even when their Developer ID signature is valid.
           spctl --assess --type execute --verbose=4 "$app"
-          spctl --assess --type execute --verbose=4 "$scanner"
 
           "$scanner" "$gain_vst3" > verify/scanner-result.json
           jq -e '.passed == true
