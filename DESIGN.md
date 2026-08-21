@@ -54,7 +54,7 @@ Action output:
 
 Callback expectations:
 
-- `addPlugins(paths)`: append supported `.vst3` bundles selected from the `PLUGIN` menu or dropped onto the console. The controller owns scanning, safe realtime suspension, loading, reporting, and UI refresh.
+- `addPlugins(paths)`: append supported `.vst3` bundles, or macOS AUv2 `.component` bundles, selected from the `PLUGIN` menu or dropped onto the console. The controller owns scanning, safe realtime suspension, loading, reporting, and UI refresh.
 - `play()`: request `/transport/play`.
 - `stop()`: request `/transport/stop`.
 - `panic()`: request `/host/panic` and all-notes-off behavior.
@@ -85,10 +85,10 @@ Automation IDs:
 
 Human loading surfaces:
 
-- Embedded monochrome menu bar: `PLUGIN > ADD VST3...` (stable item ID `1`).
-- Multi-select native file chooser supporting package-style macOS VST3 bundles and directory-style Windows VST3 bundles.
-- Whole-console file drop target accepting `.vst3` paths only and removing duplicate paths before dispatch.
-- High-contrast `DROP VST3 TO ADD TO CHAIN` overlay while an acceptable drag is over the console.
+- Embedded monochrome menu bar: `PLUGIN > ADD VST3...` (stable item ID `1`) and macOS-only `PLUGIN > ADD AUDIO UNIT...` (stable item ID `2`).
+- Multi-select native file choosers supporting package-style macOS VST3/AUv2 bundles and directory-style Windows VST3 bundles.
+- Whole-console file drop target accepting `.vst3` paths plus `.component` paths on macOS and removing duplicate paths before dispatch.
+- High-contrast `DROP PLUG-IN TO ADD TO CHAIN` overlay while an acceptable drag is over the console.
 - Empty-chain guidance names both the menu and drag-and-drop paths.
 
 The component also exposes and accepts a chromatic one-octave keyboard layout (`A W S E D F T G Y H U J K`, MIDI notes 60-72). Pointer and key press/release are translated to queued Note On/Off commands without touching the audio processor directly.
@@ -111,7 +111,7 @@ Control typography requests `Departure Mono`, a bitmap-influenced mono face dist
 
 ## Verification notes
 
-The `AgentPluginHost` JUCE GUI target compiles these files and opens `HostMainWindow`. Visual QA was performed on macOS at `1080 x 720` after an actual realtime-device launch with the staged synth fixture. The host showed the complete three-column console and MIDI rail without clipping, and the row `GUI` action opened the plug-in editor in a separate window. A minimum-size regression test verifies all eight rows' automation targets remain visible, inside the component, and at least `32 x 28` logical px. Additional regression coverage verifies VST3-only drag filtering, path de-duplication, prepared-chain append behavior, and loading the staged gain fixture after runtime preparation.
+The `AgentPluginHost` JUCE GUI target compiles these files and opens `HostMainWindow`. Visual QA was performed on macOS at `1080 x 720` after an actual realtime-device launch with the staged synth fixture. The host showed the complete three-column console and MIDI rail without clipping, and the row `GUI` action opened the plug-in editor in a separate window. A minimum-size regression test verifies all eight rows' automation targets remain visible, inside the component, and at least `32 x 28` logical px. Additional regression coverage verifies platform-specific VST3/AUv2 drag filtering, stable menu IDs, path de-duplication, prepared-chain append behavior, and loading the staged gain fixture after runtime preparation. The macOS integration test also proves that a registered staged AUv2 fixture scans, loads, renders offline, and reports its format as `AudioUnit`.
 
 The design was cross-checked against the existing Canva direction `EHL / Plugins / 8-bit UI Template` (design ID `DAHSB2E1xQE`). Brand-template enumeration was unavailable under the connected Canva plan, so the implementation uses the established code-native EHL system rather than introducing an unverified logo treatment.
 

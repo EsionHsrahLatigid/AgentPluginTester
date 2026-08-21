@@ -166,7 +166,7 @@ juce::Result HostRuntime::loadPlugins()
                     selected = description;
 
         if (selected == nullptr)
-            return juce::Result::fail ("VST3 contains multiple classes; specify classId for " + specification.path.getFullPathName());
+            return juce::Result::fail ("Plug-in bundle contains multiple classes; specify classId for " + specification.path.getFullPathName());
 
         if (const auto added = addPluginClass (specification.path, *selected, specification.bypass); added.failed())
             return added;
@@ -190,6 +190,7 @@ juce::Result HostRuntime::addPluginClass (const juce::File& path,
     pluginReport.name = loaded.metadata.name;
     pluginReport.vendor = loaded.metadata.manufacturerName;
     pluginReport.version = loaded.metadata.version;
+    pluginReport.format = loaded.metadata.formatName;
     pluginReport.latencySamples = loaded.metadata.reportedLatencySamples;
     pluginReport.loaded = true;
     pluginReport.bypass = bypassed;

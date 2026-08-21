@@ -33,6 +33,8 @@ public:
 
     PluginLoader();
 
+    static bool isSupportedPluginPath (const juce::String& path);
+
     juce::AudioPluginFormatManager& getFormatManager() noexcept { return formatManager; }
 
     PluginScanResult scanSinglePluginFile (const juce::File& pluginPath,

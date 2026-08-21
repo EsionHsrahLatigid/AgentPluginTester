@@ -1,4 +1,5 @@
 #include "AgentPluginHostUI.h"
+#include "../plugins/PluginLoader.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -127,7 +128,7 @@ void HostMainComponent::setState (HostUiState newState)
 
 bool HostMainComponent::isSupportedPluginPath (const juce::String& path)
 {
-    return juce::File (path).hasFileExtension (".vst3");
+    return agent_plugin_host::plugins::PluginLoader::isSupportedPluginPath (path);
 }
 
 juce::StringArray HostMainComponent::supportedPluginPaths (const juce::StringArray& paths)
@@ -178,7 +179,7 @@ void HostMainComponent::paint (juce::Graphics& g)
     {
         g.setColour (mid);
         g.setFont (makeFont (11.0f));
-        g.drawFittedText ("NO VST3 LOADED\nDROP .VST3 HERE  /  PLUGIN > ADD VST3...",
+        g.drawFittedText ("NO PLUG-IN LOADED\nDROP VST3 / AU HERE  /  USE THE PLUGIN MENU",
                           chainBounds.reduced (16).withTrimmedTop (24), juce::Justification::centred, 2);
     }
 
@@ -223,7 +224,7 @@ void HostMainComponent::paint (juce::Graphics& g)
         strokeRect (g, overlay, paper, 4);
         g.setColour (paper);
         g.setFont (makeFont (22.0f, juce::Font::bold));
-        g.drawFittedText ("DROP VST3 TO ADD TO CHAIN", overlay.reduced (24), juce::Justification::centred, 1);
+        g.drawFittedText ("DROP PLUG-IN TO ADD TO CHAIN", overlay.reduced (24), juce::Justification::centred, 1);
     }
 }
 
@@ -726,33 +727,56 @@ juce::PopupMenu HostMainWindow::getMenuForIndex (int topLevelMenuIndex, const ju
     juce::PopupMenu menu;
     menu.setLookAndFeel (&menuLookAndFeel);
     if (topLevelMenuIndex == 0)
+    {
         menu.addItem (addVst3MenuItemId, "ADD VST3...");
+       #if JUCE_MAC
+        menu.addItem (addAudioUnitMenuItemId, "ADD AUDIO UNIT...");
+       #endif
+    }
     return menu;
 }
 
 void HostMainWindow::menuItemSelected (int menuItemId, int)
 {
     if (menuItemId == addVst3MenuItemId)
-        showPluginChooser();
+        showPluginChooser (PluginChoice::vst3);
+   #if JUCE_MAC
+    else if (menuItemId == addAudioUnitMenuItemId)
+        showPluginChooser (PluginChoice::audioUnit);
+   #endif
 }
 
-void HostMainWindow::showPluginChooser()
+void HostMainWindow::showPluginChooser (PluginChoice choice)
 {
     if (pluginChooser != nullptr)
         return;
 
-    if (lastPluginDirectory == juce::File())
-        lastPluginDirectory = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    auto& lastDirectory = choice == PluginChoice::audioUnit ? lastAudioUnitDirectory : lastVst3Directory;
+    if (lastDirectory == juce::File())
+    {
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+       #if JUCE_MAC
+        const auto formatDirectory = choice == PluginChoice::audioUnit
+                                   ? home.getChildFile ("Library/Audio/Plug-Ins/Components")
+                                   : home.getChildFile ("Library/Audio/Plug-Ins/VST3");
+        lastDirectory = formatDirectory.isDirectory() ? formatDirectory : home;
+       #else
+        lastDirectory = home;
+       #endif
+    }
+
+    const auto title = choice == PluginChoice::audioUnit ? "ADD AUDIO UNIT PLUG-INS" : "ADD VST3 PLUG-INS";
+    const auto wildcard = choice == PluginChoice::audioUnit ? "*.component" : "*.vst3";
 
     pluginChooser = std::make_unique<juce::FileChooser> (
-        "ADD VST3 PLUG-INS", lastPluginDirectory, "*.vst3", true, false, this);
+        title, lastDirectory, wildcard, true, false, this);
 
     constexpr auto flags = juce::FileBrowserComponent::openMode
                          | juce::FileBrowserComponent::canSelectFiles
                          | juce::FileBrowserComponent::canSelectDirectories
                          | juce::FileBrowserComponent::canSelectMultipleItems;
     juce::Component::SafePointer<HostMainWindow> safeThis (this);
-    pluginChooser->launchAsync (flags, [safeThis] (const juce::FileChooser& chooser)
+    pluginChooser->launchAsync (flags, [safeThis, choice] (const juce::FileChooser& chooser)
     {
         if (safeThis == nullptr)
             return;
@@ -763,7 +787,12 @@ void HostMainWindow::showPluginChooser()
             paths.add (result.getFullPathName());
 
         if (! results.isEmpty())
-            safeThis->lastPluginDirectory = results.getFirst().getParentDirectory();
+        {
+            auto& remembered = choice == PluginChoice::audioUnit
+                             ? safeThis->lastAudioUnitDirectory
+                             : safeThis->lastVst3Directory;
+            remembered = results.getFirst().getParentDirectory();
+        }
 
         safeThis->hostComponent->requestPluginLoad (paths);
         juce::MessageManager::callAsync ([safeThis]

@@ -8,6 +8,19 @@ PluginLoader::PluginLoader()
     juce::addDefaultFormatsToManager (formatManager);
 }
 
+bool PluginLoader::isSupportedPluginPath (const juce::String& path)
+{
+    const juce::File file (path);
+    if (file.hasFileExtension (".vst3"))
+        return true;
+
+   #if JUCE_MAC
+    return file.hasFileExtension (".component");
+   #else
+    return false;
+   #endif
+}
+
 PluginScanResult PluginLoader::scanSinglePluginFile (const juce::File& pluginPath,
                                                      const juce::File& deadManMarker) const
 {
@@ -106,8 +119,14 @@ juce::String PluginLoader::validatePluginPath (const juce::File& pluginPath)
     if (! pluginPath.exists())
         return "Plugin path does not exist: " + pluginPath.getFullPathName();
 
-    if (! pluginPath.hasFileExtension (".vst3"))
-        return "Only VST3 plugins are supported by the initial scanner: " + pluginPath.getFullPathName();
+    if (! isSupportedPluginPath (pluginPath.getFullPathName()))
+    {
+       #if JUCE_MAC
+        return "Only VST3 and Audio Unit (.component) plugins are supported: " + pluginPath.getFullPathName();
+       #else
+        return "Only VST3 plugins are supported: " + pluginPath.getFullPathName();
+       #endif
+    }
 
     return {};
 }

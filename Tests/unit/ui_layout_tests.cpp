@@ -61,7 +61,7 @@ public:
         expect (native != nullptr && native->getButtonText().containsIgnoreCase ("GUI"));
         expect (generic != nullptr && generic->getButtonText().containsIgnoreCase ("PARAM"));
 
-        beginTest ("drag and drop forwards only unique VST3 paths");
+        beginTest ("drag and drop forwards only unique supported plug-in paths");
         juce::StringArray receivedPaths;
         HostUiActions dropActions;
         dropActions.addPlugins = [&receivedPaths] (const juce::StringArray& paths) { receivedPaths = paths; };
@@ -71,17 +71,26 @@ public:
             "/tmp/First.vst3",
             "/tmp/readme.txt",
             "/tmp/First.vst3",
-            "/tmp/Second.VST3"
+            "/tmp/Second.VST3",
+           #if JUCE_MAC
+            "/tmp/Third.component"
+           #endif
         };
         expect (component.isInterestedInFileDrag (offeredPaths));
         expect (! component.isInterestedInFileDrag ({ "/tmp/readme.txt" }));
         component.filesDropped (offeredPaths, 10, 10);
+       #if JUCE_MAC
+        expectEquals (receivedPaths.size(), 3);
+        expect (receivedPaths[2].endsWithIgnoreCase ("Third.component"));
+       #else
         expectEquals (receivedPaths.size(), 2);
+       #endif
         expect (receivedPaths[0].endsWithIgnoreCase ("First.vst3"));
         expect (receivedPaths[1].endsWithIgnoreCase ("Second.VST3"));
 
         beginTest ("plugin menu command remains stable for automation");
         expectEquals (HostMainWindow::addVst3MenuItemId, 1);
+        expectEquals (HostMainWindow::addAudioUnitMenuItemId, 2);
     }
 };
 

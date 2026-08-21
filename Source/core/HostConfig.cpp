@@ -766,7 +766,7 @@ juce::String HostConfigParser::getHelpText()
     return "AgentPluginHost " APH_VERSION "\n"
            "Usage: AgentPluginHost [global-options] --plugin <path> [--plugin <path> ...]\n\n"
            "Options:\n"
-           "  --plugin <path>                 Add VST3 to the serial chain; repeatable.\n"
+           "  --plugin <path>                 Add VST3 or macOS AUv2 to the serial chain; repeatable.\n"
            "  --session <path>                Load JSON session; relative paths resolve from the session directory.\n"
            "  --mode <realtime|offline>       Processing mode; default realtime.\n"
            "  --gui | --no-gui                Show or hide host GUI; default GUI on.\n"

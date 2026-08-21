@@ -24,7 +24,7 @@ struct PluginSlotState
     juce::String name = "empty";
     juce::String vendor;
     juce::String version;
-    juce::String format = "VST3";
+    juce::String format;
     juce::String loadState = "empty";
     bool bypassed = false;
     bool editorVisible = false;
@@ -206,6 +206,7 @@ class HostMainWindow final : public juce::DocumentWindow,
 {
 public:
     static constexpr int addVst3MenuItemId = 1;
+    static constexpr int addAudioUnitMenuItemId = 2;
 
     HostMainWindow (juce::String name, HostUiActions actions, HostUiState initialState);
     ~HostMainWindow() override;
@@ -214,14 +215,21 @@ public:
     void closeButtonPressed() override;
 
 private:
+    enum class PluginChoice
+    {
+        vst3,
+        audioUnit
+    };
+
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex (int topLevelMenuIndex, const juce::String& menuName) override;
     void menuItemSelected (int menuItemId, int topLevelMenuIndex) override;
-    void showPluginChooser();
+    void showPluginChooser (PluginChoice);
 
     juce::LookAndFeel_V4 menuLookAndFeel;
     std::unique_ptr<juce::FileChooser> pluginChooser;
-    juce::File lastPluginDirectory;
+    juce::File lastVst3Directory;
+    juce::File lastAudioUnitDirectory;
     HostMainComponent* hostComponent = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostMainWindow)

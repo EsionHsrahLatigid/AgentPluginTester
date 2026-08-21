@@ -24,7 +24,15 @@ foreach(path IN ITEMS "${host}" "${scanner}" "${gain}" "${synth}" "${manifest}")
 endforeach()
 
 if(APPLE)
-    foreach(bundle IN ITEMS "${host}" "${gain}" "${synth}")
+    set(gain_au "${STAGE_DIR}/fixtures/aph_test_gain.component")
+    set(synth_au "${STAGE_DIR}/fixtures/aph_test_synth.component")
+    foreach(path IN ITEMS "${gain_au}" "${synth_au}")
+        if(NOT EXISTS "${path}")
+            message(FATAL_ERROR "Missing staged artifact: ${path}")
+        endif()
+    endforeach()
+
+    foreach(bundle IN ITEMS "${host}" "${gain}" "${synth}" "${gain_au}" "${synth_au}")
         execute_process(COMMAND codesign --verify --deep --strict "${bundle}"
                         RESULT_VARIABLE result ERROR_VARIABLE error)
         if(NOT result EQUAL 0)

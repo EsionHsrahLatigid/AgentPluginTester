@@ -75,7 +75,7 @@ int main (int argc, char* argv[])
     if (pluginPath == juce::File())
     {
         root->setProperty ("passed", false);
-        root->setProperty ("error", "Usage: AgentPluginScanner <plugin.vst3> [--dead-man <marker.json>]");
+        root->setProperty ("error", "Usage: AgentPluginScanner <plugin-bundle> [--dead-man <marker.json>]");
         printJson (juce::var (root.get()));
         return 2;
     }

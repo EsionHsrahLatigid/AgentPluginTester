@@ -1,6 +1,6 @@
 ---
 name: use-agent-plugin-tester
-description: Build and operate AgentPluginHost to inspect, load, interactively test, and deterministically validate VST3 audio plugins. Use when Codex needs to test a VST3 in the EHL host GUI, open a plugin's native GUI or generic parameter editor, send MIDI notes, run offline audio checks, capture WAV output, inspect NDJSON events, evaluate the final JSON report, or diagnose host/plugin loading failures in an AgentPluginTester checkout.
+description: Build and operate AgentPluginHost to inspect, load, interactively test, and deterministically validate VST3 audio plugins on macOS and Windows plus AUv2 components on macOS. Use when Codex needs to test a supported plug-in in the EHL host GUI, open its native GUI or generic parameter editor, send MIDI notes, run offline audio checks, capture WAV output, inspect NDJSON events, evaluate the final JSON report, or diagnose host/plugin loading failures in an AgentPluginTester checkout.
 ---
 
 # Use Agent Plugin Tester
@@ -33,7 +33,7 @@ Resolver controls:
 <skill-directory>/scripts/agent-plugin-tester --print-host-path
 ```
 
-Never bypass a checksum failure. Set `AGENT_PLUGIN_TESTER_CACHE_DIR` only when a task needs an isolated cache. Use `AGENT_PLUGIN_TESTER_RELEASE_BASE_URL` only for a trusted mirror or downloader tests.
+`v0.2.0` is the current exact public release and is VST3-only. AUv2 support is implemented in source version `0.3.0`; use a source build until a signed `v0.3.0` release is published. Never bypass a checksum failure. Set `AGENT_PLUGIN_TESTER_CACHE_DIR` only when a task needs an isolated cache. Use `AGENT_PLUGIN_TESTER_RELEASE_BASE_URL` only for a trusted mirror or downloader tests.
 
 ## Build from source when needed
 
@@ -74,6 +74,8 @@ For the commands below, set `HOST` to either the release launcher or a staged so
 ```
 
 Stop and report the scanner error when inspection fails. If the bundle exposes multiple classes, use a session file with the desired `classId`.
+
+On macOS, an AUv2 `.component` must be installed in `~/Library/Audio/Plug-Ins/Components` or `/Library/Audio/Plug-Ins/Components` and visible to the CoreAudio registrar. Do not move, overwrite, or delete an installed component unless the user explicitly requested installation work. An arbitrary unregistered copy can fail to scan even when the bundle is valid.
 
 ## Choose a test lane
 
@@ -123,7 +125,8 @@ Run with `--gui`. Use `--show-editors` to open every loaded plugin GUI after sta
 In the host window:
 
 - use `PLUGIN > ADD VST3...` to select and append one or more VST3 bundles after launch;
-- drag `.vst3` bundles from Finder or Explorer onto the main console to append them to the current chain;
+- on macOS, use `PLUGIN > ADD AUDIO UNIT...` for installed AUv2 `.component` bundles;
+- drag `.vst3` bundles, or `.component` bundles on macOS, onto the main console to append them to the current chain;
 - expect a bundle containing multiple plug-in classes to append all detected classes in scan order when loaded from the GUI;
 - use `GUI` on a plugin row to open its native editor in a separate window;
 - expect `GUI` to fall back to the generic parameter editor when the plugin has no native editor;
@@ -141,7 +144,7 @@ Read [session-reference.md](references/session-reference.md) before creating or 
 ## Diagnose failures
 
 1. Re-run `--inspect-plugin` to separate scan/load failures from processing failures.
-2. Confirm architecture and format match the staged host; the host loads VST3 only.
+2. Confirm architecture and format match the staged host: VST3 is supported on macOS and Windows, and registered AUv2 `.component` bundles are supported on macOS.
 3. Run the fixture plugins from `artifacts/host-release/<platform>/fixtures/` to verify the host itself.
 4. Use `--events stdout` or an NDJSON file for lifecycle evidence.
 5. Check the final report before interpreting audio output.

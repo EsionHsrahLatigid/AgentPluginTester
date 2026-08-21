@@ -39,6 +39,8 @@ jobs:
           codesign --verify --deep --strict artifacts/host-release/macos-arm64/app/agent_plugin_host.app
           codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_gain.vst3
           codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_synth.vst3
+          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_gain.component
+          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_synth.component
 
       - name: Package release asset
         run: |

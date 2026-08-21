@@ -1,6 +1,6 @@
 # AgentPluginHost
 
-AgentPluginHost is an EHL JUCE 8 desktop VST3 test host for deterministic manual, agent, and CI validation. It provides a serial plug-in chain, generated/file/mic input, sample-accurate MIDI, loopback OSC control, asynchronous float WAV capture, audio statistics, NDJSON progress, and final JSON reports.
+AgentPluginHost is an EHL JUCE 8 desktop plug-in test host for deterministic manual, agent, and CI validation. It supports VST3 on macOS and Windows plus AUv2 `.component` bundles on macOS. It provides a serial plug-in chain, generated/file/mic input, sample-accurate MIDI, loopback OSC control, asynchronous float WAV capture, audio statistics, NDJSON progress, and final JSON reports.
 
 ## Identity
 
@@ -31,6 +31,8 @@ artifacts/host-release/macos-arm64/app/agent_plugin_host.app
 artifacts/host-release/macos-arm64/scanner/agent_plugin_scanner
 artifacts/host-release/macos-arm64/fixtures/aph_test_gain.vst3
 artifacts/host-release/macos-arm64/fixtures/aph_test_synth.vst3
+artifacts/host-release/macos-arm64/fixtures/aph_test_gain.component
+artifacts/host-release/macos-arm64/fixtures/aph_test_synth.component
 artifacts/host-release/macos-arm64/ARTIFACTS.txt
 
 artifacts/host-release/windows-x64/app/agent_plugin_host.exe
@@ -51,7 +53,9 @@ AgentPluginHost --list-devices
 AgentPluginHost --inspect-plugin /path/to/plugin.vst3
 ```
 
-For interactive use, launch the app with no `--plugin` argument, then use `PLUGIN > ADD VST3...` to select one or more VST3 bundles. You can also drag `.vst3` bundles from Finder or Explorer onto the main console. Each selection is appended to the current chain; a bundle containing multiple plug-in classes adds all detected classes in scan order. During a realtime addition, the host briefly detaches its audio callback, updates the prepared chain, and resumes without resetting the source, transport, analysis, or capture state.
+For interactive use, launch the app with no `--plugin` argument, then use `PLUGIN > ADD VST3...`. On macOS, `PLUGIN > ADD AUDIO UNIT...` also loads AUv2 `.component` bundles. You can drag supported bundles from Finder or Explorer onto the main console. Each selection is appended to the current chain; a bundle containing multiple plug-in classes adds all detected classes in scan order. During a realtime addition, the host briefly detaches its audio callback, updates the prepared chain, and resumes without resetting the source, transport, analysis, or capture state.
+
+macOS Audio Units must be installed in a CoreAudio component location such as `~/Library/Audio/Plug-Ins/Components` or `/Library/Audio/Plug-Ins/Components` so the system registrar can discover them. The AU menu opens the user Components directory by default. Arbitrary copied `.component` paths that are not registered may fail to scan even when the bundle itself is valid.
 
 Each loaded row exposes `GUI` for the native plug-in editor (with generic fallback) and `PARAMS` for the generic parameter editor.
 
@@ -80,7 +84,7 @@ Install the published skill with:
 npx skills add EsionHsrahLatigid/AgentPluginTester --skill use-agent-plugin-tester -g -a codex -y
 ```
 
-The launchers use GitHub Latest by default. Use `--host-version v0.2.0` for an exact release, `--update` to refresh the selected version, and `--offline` to prohibit downloads. macOS caches under `~/Library/Caches/AgentPluginTester`; Windows caches under `%LOCALAPPDATA%\AgentPluginTester\Cache`.
+The launchers use GitHub Latest by default. Use `--host-version v0.2.0` for the current exact public release, `--update` to refresh the selected version, and `--offline` to prohibit downloads. AUv2 support is implemented in source version `0.3.0`; use a source build until a signed `v0.3.0` release is published. macOS caches under `~/Library/Caches/AgentPluginTester`; Windows caches under `%LOCALAPPDATA%\AgentPluginTester\Cache`.
 
 ## License
 

@@ -52,6 +52,7 @@ public:
         expectEquals (runtime.getReport().plugins.size(), 1);
         expect (runtime.getReport().plugins[0].loaded);
         expect (runtime.getReport().plugins[0].path == fixture.getFullPathName());
+        expect (runtime.getReport().plugins[0].format == "VST3");
     }
 };
 

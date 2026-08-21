@@ -1,14 +1,14 @@
 # Agent Plugin Test Host 仕様書
 
-- 文書バージョン: 0.1.0
+- 文書バージョン: 0.2.0
 - 作成日: 2026-08-12
-- ステータス: 実装着手可能な初期仕様
+- ステータス: 実装済み仕様（macOS AUv2拡張を含む）
 - 仮称: **AgentPluginHost**
 - 実装技術: C++17 / JUCE 8系 / CMake 3.22以上
 
 ## 1. 概要
 
-AgentPluginHostは、AIエージェントおよび人間の開発者がVST3オーディオプラグインを自動・対話的に検査するためのスタンドアロンホストアプリケーションである。
+AgentPluginHostは、AIエージェントおよび人間の開発者がVST3およびmacOS AUv2オーディオプラグインを自動・対話的に検査するためのスタンドアロンホストアプリケーションである。
 
 本アプリケーションはコマンドラインから起動するGUIアプリとして動作し、複数プラグインの直列チェイン、決定的なテスト信号、OSC/MIDI制御、出力音声の録音と統計取得、自動終了、機械可読レポートを提供する。
 
@@ -23,25 +23,25 @@ AgentPluginHostは、AIエージェントおよび人間の開発者がVST3オ�
 | --- | --- | --- |
 | CPU | Apple Silicon必須、Intelは任意 | x64必須、ARM64は将来対応 |
 | OS | macOS 13以降を初期対象 | Windows 10 22H2 / Windows 11 |
-| プラグイン形式 | VST3 | VST3 |
-| AudioUnit | 初期版では対象外 | 対象外 |
+| プラグイン形式 | VST3、AUv2 `.component` | VST3 |
+| AudioUnit | AUv2対応、AUv3対象外 | 対象外 |
 | 音声API | CoreAudio | WASAPI、ASIOは任意追加 |
 | GUI | JUCEネイティブGUI | JUCEネイティブGUI |
 
 ### 2.1 形式選定
 
-- 初期版はVST3に統一する。
+- VST3をmacOS/Windows共通形式とする。
 - VST2はSDK、配布、互換性上の理由から対象外とする。
-- AudioUnitは初期版の実装と検証範囲から除外する。
+- macOSではJUCEのAudio Unitホストを有効化し、CoreAudioへ登録済みのAUv2 `.component`を対象とする。
 - macOSとWindowsで同じVST3テスト定義を再利用できることを優先する。
-- 将来AudioUnit対応を追加できるよう、プラグイン形式固有処理は抽象化する。
+- AUv3 `.appex`およびAudio Unit Extensionの埋め込みホストは対象外とする。
 
 ## 3. 目標
 
 ### 3.1 必須目標
 
 - CLIで起動、構成、実行時間、出力先を指定できる。
-- 複数のVST3パスを指定順に直列接続できる。
+- 複数の対応プラグインパスを指定順に直列接続できる。
 - ホストGUIと各プラグインのネイティブEditorを表示できる。
 - マイク、サイン波、ホワイトノイズ、無音などを入力にできる。
 - GUI、OSC、CLIテストシナリオからMIDIイベントを生成できる。
@@ -53,7 +53,7 @@ AgentPluginHostは、AIエージェントおよび人間の開発者がVST3オ�
 ### 3.2 非目標
 
 - DAW相当の編集、タイムライン、ミキサー機能
-- VST2、AAX、AudioUnit、LV2の初期対応
+- VST2、AAX、AUv3、LV2の対応
 - プラグインの完全なサンドボックス実行
 - 商用DAWすべてとの挙動一致
 - 音質の主観評価
@@ -63,11 +63,11 @@ AgentPluginHostは、AIエージェントおよび人間の開発者がVST3オ�
 
 ### UC-01: 単一エフェクトのスモークテスト
 
-サイン波をVST3へ入力し、5秒間処理して、出力が有限値であり無音でなく、クリップしていないことを確認する。
+サイン波を対応プラグインへ入力し、5秒間処理して、出力が有限値であり無音でなく、クリップしていないことを確認する。
 
 ### UC-02: シンセサイザーのMIDIテスト
 
-無音入力でシンセVST3をロードし、Note On/Offを送信して、発音、リリース、無音復帰を検査する。
+無音入力でシンセプラグインをロードし、Note On/Offを送信して、発音、リリース、無音復帰を検査する。
 
 ### UC-03: 複数プラグインのチェインテスト
 
@@ -152,7 +152,7 @@ PowerShell:
 
 | オプション | 値 | 既定値 | 説明 |
 | --- | --- | --- | --- |
-| `--plugin` | path | なし | VST3を指定する。複数回指定可能 |
+| `--plugin` | path | なし | VST3、またはmacOSでは登録済みAUv2 `.component`を指定する。複数回指定可能 |
 | `--session` | JSON path | なし | セッション定義を読み込む |
 | `--mode` | realtime/offline | realtime | 処理モード |
 | `--gui` | flag | on | ホストGUIを表示 |
@@ -215,12 +215,13 @@ PowerShell:
 
 ### 7.1 ロード
 
-- `juce::AudioPluginFormatManager`へVST3形式を登録する。
+- `juce::AudioPluginFormatManager`へVST3形式を登録し、macOSではAudio Unit形式も登録する。
 - 指定パスを正規化し、存在、拡張子、読取可能性を検査する。
-- VST3バンドル内に複数クラスがある場合、検出したクラス一覧を返す。
+- 対応プラグインバンドル内に複数クラスがある場合、検出したクラス一覧を返す。
 - クラスが1件なら自動選択する。
 - CLI/セッションで複数クラスの場合はセッション定義のclass ID指定を優先し、未指定なら明示エラーとする。
-- GUIのメニュー選択またはドラッグ＆ドロップで複数クラスを含むVST3を追加した場合は、検出順に全クラスをチェイン末尾へ追加する。
+- GUIのメニュー選択またはドラッグ＆ドロップで複数クラスを含むプラグインを追加した場合は、検出順に全クラスをチェイン末尾へ追加する。
+- AUv2はCoreAudioの登録情報から解決されるため、`.component`を標準のComponentsディレクトリへインストールし、AudioComponentRegistrarから認識可能にする必要がある。
 - インスタンス生成はメッセージスレッドをブロックしない非同期経路を基本とする。
 - ロード進捗とエラーをGUI、NDJSON、OSC応答へ同じ内容で通知する。
 
@@ -638,7 +639,7 @@ CLIの複雑化を避けるため、JSONセッションファイルを提供す�
 
 ## 18. セキュリティとプライバシー
 
-- VST3はネイティブコードであり、ホストユーザーと同じ権限で実行されることを明示する。
+- VST3およびAUv2はネイティブコードであり、ホストユーザーと同じ権限で実行されることを明示する。
 - 信頼できないプラグインの実行を安全とはみなさない。
 - OSCは既定でloopbackのみへbindする。
 - 外部bind時は警告を表示し、将来tokenまたは許可IPを追加できる構造にする。
@@ -655,7 +656,7 @@ CLIの複雑化を避けるため、JSONセッションファイルを提供す�
 | `Application` | 起動、CLI、終了コード、トップレベル状態 |
 | `SessionController` | 設定検証、状態遷移、テスト進行 |
 | `PluginScannerClient` | scanner helper processとの通信 |
-| `PluginLoader` | VST3検出、非同期生成、metadata |
+| `PluginLoader` | VST3/AUv2検出、非同期生成、metadata |
 | `PluginChain` | Audio/MIDI直列処理、bypass、latency |
 | `SourceEngine` | マイク、生成信号、ファイル入力 |
 | `MidiScheduler` | GUI/OSC/fileイベントのsample-accurate scheduling |
@@ -751,7 +752,7 @@ TestSynthVST3              テスト用fixture plugin
 ```cmake
 JUCE_PLUGINHOST_VST3=1
 JUCE_PLUGINHOST_VST=0
-JUCE_PLUGINHOST_AU=0
+JUCE_PLUGINHOST_AU=1  # macOSのみ。Windowsは0
 JUCE_USE_CURL=0
 JUCE_WEB_BROWSER=0
 ```
@@ -789,8 +790,8 @@ macOS/Windows固有の音声backend定義は必要最小限にする。Windows�
 
 ### 21.3 Fixture plugin
 
-- 既知gainを適用する`TestGainVST3`
-- 固定波形を発音する`TestSynthVST3`
+- 既知gainを適用する`TestGainVST3`（VST3、macOS AUv2）
+- 固定波形を発音する`TestSynthVST3`（VST3、macOS AUv2）
 - latencyを報告するfixture
 - MIDIを通過/変換するfixture。優先度P1
 - 意図的にNaNを返すfixture。テストビルド限定
@@ -799,6 +800,7 @@ macOS/Windows固有の音声backend定義は必要最小限にする。Windows�
 ### 21.4 E2E
 
 - macOSでVST3を2段ロードし、GUI表示、MIDI、録音、JSON成功を確認
+- macOSでfixture AUv2を一時登録し、scan、offline render、format metadata、cleanupを確認
 - Windowsで同じsessionを実行し、許容差内の統計を確認
 - offlineで同一seedを2回実行し、fixture出力が一致
 - 不正パスでexit code 3
@@ -824,14 +826,14 @@ GitHub Actionsで最低限次のmatrixを実行する。
 | OS | Configuration | 内容 |
 | --- | --- | --- |
 | macOS | Debug | unit/integration、sanitizer可能範囲 |
-| macOS | Release | app、scanner、fixture VST3 build、offline E2E |
+| macOS | Release | app、scanner、fixture VST3/AUv2 build、offline E2E |
 | Windows | Debug | unit/integration |
 | Windows | Release | app、scanner、fixture VST3 build、offline E2E |
 
 - GUIと物理デバイスを必要とするテストはCIの必須条件から分離する。
 - オフラインE2Eを共通の必須gateとする。
 - JUCE FetchContentとcompiler outputをcacheする。
-- VST3 fixtureとホスト実行ファイルをartifactとして保存する。
+- VST3 fixture、macOS AUv2 fixture、ホスト実行ファイルをartifactとして保存する。
 - テスト結果はCTest/JUnit XML、計測結果はJSON artifactとして保存する。
 - 依存revision変更時にcache keyを更新する。
 
@@ -856,7 +858,7 @@ GitHub Actionsで最低限次のmatrixを実行する。
 
 ### AC-01: クロスプラットフォームビルド
 
-- macOSとWindowsのRelease構成で`AgentPluginHost`、`AgentPluginScanner`、fixture VST3がビルド成功する。
+- macOSとWindowsのRelease構成で`AgentPluginHost`、`AgentPluginScanner`、fixture VST3がビルド成功し、macOSではfixture AUv2もビルド成功する。
 
 ### AC-02: 複数ロード
 
@@ -868,7 +870,8 @@ GitHub Actionsで最低限次のmatrixを実行する。
 - ホストGUIが表示され、各fixtureのネイティブまたは汎用Editorを開閉できる。
 - Editorを閉じても音声処理が継続する。
 - `PLUGIN > ADD VST3...`から複数VST3を選択して現在のチェインへ追加できる。
-- `.vst3`をホスト画面へドラッグ＆ドロップして現在のチェインへ追加でき、非VST3パスは無視する。
+- macOSでは`PLUGIN > ADD AUDIO UNIT...`から登録済みAUv2を選択して現在のチェインへ追加できる。
+- `.vst3`およびmacOSの`.component`をホスト画面へドラッグ＆ドロップして現在のチェインへ追加でき、非対応パスは無視する。
 
 ### AC-04: 入力源
 
@@ -909,7 +912,7 @@ GitHub Actionsで最低限次のmatrixを実行する。
 
 ### P0: MVP
 
-- macOS/Windows VST3ホスト
+- macOS/Windows VST3ホスト、macOS AUv2ホスト
 - CLIとJSON session
 - 複数直列チェイン
 - GUIとEditor表示
@@ -943,13 +946,14 @@ GitHub Actionsで最低限次のmatrixを実行する。
 - runtime worker process分離
 - sidechain/parallel routing
 - remote OSC認証
-- macOS AudioUnit対応
+- macOS AUv3対応
 
 ## 27. 既知の制約とリスク
 
-- ネイティブVST3はホストプロセスをクラッシュまたはハングさせられる。
+- ネイティブVST3/AUv2はホストプロセスをクラッシュまたはハングさせられる。
 - ベンダー独自認証、GPU、WebView、OS APIを使うEditorはCIや`--no-gui`で動作しない場合がある。
 - 同一VST3でもmacOS/Windows間で内部DSP、preset、parameter ID、浮動小数点結果が完全一致しない場合がある。
+- AUv2はCoreAudioへ登録されていない任意パスの`.component`を直接ロードできない場合がある。
 - 実時間CPU統計はOS、音声driver、電源状態に依存する。
 - WASAPIとASIOではdevice、buffer、latency挙動が異なる。
 - プラグインが報告するlatency/tailが正しいとは限らないため、報告値と実測値を区別する。
@@ -980,4 +984,4 @@ GitHub Actionsで最低限次のmatrixを実行する。
 
 ---
 
-本仕様では、クロスプラットフォーム性とAIエージェントによる再現可能な自動操作を優先し、初期対象をmacOS/WindowsのVST3へ限定している。AudioUnit対応は将来拡張として境界だけを残す。
+本仕様では、クロスプラットフォーム性とAIエージェントによる再現可能な自動操作を優先し、macOS/Windows共通のVST3に加えてmacOSネイティブのAUv2 `.component`を同じ操作・レポート契約で扱う。AUv3は将来拡張として対象外に残す。

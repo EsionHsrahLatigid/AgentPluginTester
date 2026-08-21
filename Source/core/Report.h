@@ -14,7 +14,7 @@ struct PluginReport
     juce::String name;
     juce::String vendor;
     juce::String version;
-    juce::String format = "VST3";
+    juce::String format;
     int latencySamples = 0;
     bool loaded = false;
     bool bypass = false;

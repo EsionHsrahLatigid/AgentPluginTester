@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(AgentPluginHost VERSION 0.2.0 LANGUAGES C CXX)
+project(AgentPluginHost VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,10 +8,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum supported macOS version")
 
 option(AGENTPLUGINHOST_BUILD_APP "Build the AgentPluginHost app and scanner" ON)
-option(AGENTPLUGINHOST_BUILD_TESTS "Build unit tests and fixture VST3s" ON)
+option(AGENTPLUGINHOST_BUILD_TESTS "Build unit tests and fixture plug-ins" ON)
 option(AGENTPLUGINHOST_VERIFY_ARTIFACTS "Register the staged artifact contract test" OFF)
 set(AGENTPLUGINHOST_ARTIFACT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/artifacts" CACHE PATH "Stable product staging root")
 set(EHL_JUCE_SOURCE_DIR "" CACHE PATH "Existing JUCE source checkout; avoids network when set")
+
+set(AGENTPLUGINHOST_ENABLE_AUDIO_UNIT 0)
+if(APPLE)
+    set(AGENTPLUGINHOST_ENABLE_AUDIO_UNIT 1)
+endif()
 
 if(EHL_JUCE_SOURCE_DIR)
     if(NOT EXISTS "${EHL_JUCE_SOURCE_DIR}/CMakeLists.txt")
@@ -35,7 +40,7 @@ function(agentpluginhost_set_common_target_options target)
     target_compile_definitions(${target} PUBLIC
         JUCE_PLUGINHOST_VST3=1
         JUCE_PLUGINHOST_VST=0
-        JUCE_PLUGINHOST_AU=0
+        JUCE_PLUGINHOST_AU=${AGENTPLUGINHOST_ENABLE_AUDIO_UNIT}
         JUCE_REPORT_APP_USAGE=0
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_USE_CURL=0
@@ -137,12 +142,17 @@ if(AGENTPLUGINHOST_BUILD_TESTS)
                 -Launcher "${CMAKE_CURRENT_SOURCE_DIR}/skills/use-agent-plugin-tester/scripts/agent-plugin-tester.ps1")
     endif()
 
+    set(agentpluginhost_fixture_formats VST3)
+    if(APPLE)
+        list(APPEND agentpluginhost_fixture_formats AU)
+    endif()
+
     juce_add_plugin(TestGainVST3
         COMPANY_NAME "EsionHsrahLatigid"
         BUNDLE_ID "jp.ehl.agentpluginhost.testgain"
         PLUGIN_MANUFACTURER_CODE EHL_
         PLUGIN_CODE ApGn
-        FORMATS VST3
+        FORMATS ${agentpluginhost_fixture_formats}
         IS_SYNTH FALSE
         NEEDS_MIDI_INPUT FALSE
         NEEDS_MIDI_OUTPUT FALSE
@@ -157,7 +167,7 @@ if(AGENTPLUGINHOST_BUILD_TESTS)
         BUNDLE_ID "jp.ehl.agentpluginhost.testsynth"
         PLUGIN_MANUFACTURER_CODE EHL_
         PLUGIN_CODE ApSy
-        FORMATS VST3
+        FORMATS ${agentpluginhost_fixture_formats}
         IS_SYNTH TRUE
         NEEDS_MIDI_INPUT TRUE
         NEEDS_MIDI_OUTPUT FALSE
@@ -194,9 +204,13 @@ if(AGENTPLUGINHOST_BUILD_APP AND AGENTPLUGINHOST_BUILD_TESTS)
             COMMAND ${CMAKE_COMMAND} -E copy "${ehl_scanner_products}/AgentPluginScanner" "${ehl_stage_dir}/scanner/agent_plugin_scanner"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_gain_products}/VST3/APH Test Gain.vst3" "${ehl_stage_dir}/fixtures/aph_test_gain.vst3"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_synth_products}/VST3/APH Test Synth.vst3" "${ehl_stage_dir}/fixtures/aph_test_synth.vst3"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_gain_products}/AU/APH Test Gain.component" "${ehl_stage_dir}/fixtures/aph_test_gain.component"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_synth_products}/AU/APH Test Synth.component" "${ehl_stage_dir}/fixtures/aph_test_synth.component"
             COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/app/agent_plugin_host.app"
             COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/fixtures/aph_test_gain.vst3"
-            COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/fixtures/aph_test_synth.vst3")
+            COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/fixtures/aph_test_synth.vst3"
+            COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/fixtures/aph_test_gain.component"
+            COMMAND codesign --force --deep --sign - "${ehl_stage_dir}/fixtures/aph_test_synth.component")
     elseif(WIN32)
         list(APPEND ehl_stage_commands
             COMMAND ${CMAKE_COMMAND} -E copy "${ehl_app_products}/AgentPluginHost.exe" "${ehl_stage_dir}/app/agent_plugin_host.exe"
@@ -216,11 +230,17 @@ if(AGENTPLUGINHOST_BUILD_APP AND AGENTPLUGINHOST_BUILD_TESTS)
             -DPRODUCT_NAME=AgentPluginHost
             -DBUNDLE_ID=jp.ehl.agentpluginhost
             -DSTAGE_DIR=${ehl_stage_dir}
+            -DINCLUDE_AUDIO_UNIT=${AGENTPLUGINHOST_ENABLE_AUDIO_UNIT}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteArtifactsManifest.cmake")
+
+    set(ehl_stage_dependencies AgentPluginHost AgentPluginScanner TestGainVST3_VST3 TestSynthVST3_VST3)
+    if(APPLE)
+        list(APPEND ehl_stage_dependencies TestGainVST3_AU TestSynthVST3_AU)
+    endif()
 
     add_custom_target(ehl_stage_products
         ${ehl_stage_commands}
-        DEPENDS AgentPluginHost AgentPluginScanner TestGainVST3_VST3 TestSynthVST3_VST3
+        DEPENDS ${ehl_stage_dependencies}
         COMMENT "Staging AgentPluginHost products under ${AGENTPLUGINHOST_ARTIFACT_ROOT}/host-release")
 
     if(AGENTPLUGINHOST_VERIFY_ARTIFACTS)
@@ -229,5 +249,15 @@ if(AGENTPLUGINHOST_BUILD_APP AND AGENTPLUGINHOST_BUILD_TESTS)
             COMMAND ${CMAKE_COMMAND}
                 -DSTAGE_DIR=${ehl_stage_dir}
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/Tests/VerifyArtifacts.cmake")
+
+        if(APPLE)
+            add_test(
+                NAME agent_plugin_host_audio_unit
+                COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/Tests/integration/test-audio-unit.sh"
+                    "${ehl_stage_dir}/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost"
+                    "${ehl_stage_dir}/scanner/agent_plugin_scanner"
+                    "${ehl_stage_dir}/fixtures/aph_test_gain.component")
+            set_tests_properties(agent_plugin_host_audio_unit PROPERTIES TIMEOUT 60)
+        endif()
     endif()
 endif()
