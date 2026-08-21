@@ -16,136 +16,399 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: read
-  contents: write
+  contents: read
 
 jobs:
-  promote:
-    name: Promote exact CI artifacts
+  provenance:
+    name: Resolve exact-SHA CI artifacts
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      macos_id: ${{ steps.artifacts.outputs.macos_id }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      tag: ${{ steps.source.outputs.tag }}
+      version: ${{ steps.source.outputs.version }}
+      windows_id: ${{ steps.artifacts.outputs.windows_id }}
     env:
       GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - name: Validate tag
+      - name: Verify toolchain
+        shell: bash
         run: |
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must be vMAJOR.MINOR.PATCH: $TAG" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          command -v gh
+          command -v jq
+          command -v unzip
+          command -v sha256sum
 
-      - name: Checkout tagged source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ env.TAG }}
-          fetch-depth: 0
-
-      - name: Resolve immutable source revision
+      - name: Resolve immutable source and successful CI run
         id: source
+        shell: bash
         run: |
-          source_sha="$(git rev-list -n 1 "$TAG")"
-          project_version="$(sed -nE 's/^project\(AgentPluginHost VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          if [[ "v$project_version" != "$TAG" ]]; then
-            echo "CMake project version v$project_version does not match $TAG." >&2
-            exit 1
-          fi
-          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${TAG#v}"
 
-      - name: Resolve successful exact-SHA CI run
-        id: ci
-        env:
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: |
-          runs="$(gh api --paginate --slurp --method GET "repos/$REPOSITORY/actions/workflows/ci.yml/runs" \
-            -f branch=main -f event=push -f status=success -f per_page=100)"
-          matches="$(jq --arg sha "$SOURCE_SHA" '[.[].workflow_runs[] | select(.head_sha == $sha)]' <<< "$runs")"
-          count="$(jq 'length' <<< "$matches")"
-          if [[ "$count" != 1 ]]; then
-            echo "Expected one successful main CI run for $SOURCE_SHA, found $count." >&2
-            exit 1
-          fi
-          run_id="$(jq -r '.[0].id' <<< "$matches")"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          target_type="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.type')"
+          target_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha')"
+          depth=0
+          while [[ "$target_type" == tag ]]; do
+            depth=$((depth + 1))
+            [[ "$depth" -le 5 ]]
+            tag_object="$(gh api "repos/$GH_REPO/git/tags/$target_sha")"
+            target_type="$(jq -r '.object.type' <<< "$tag_object")"
+            target_sha="$(jq -r '.object.sha' <<< "$tag_object")"
+          done
+          [[ "$target_type" == commit ]]
+
+          cmake_source="$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/CMakeLists.txt?ref=$target_sha")"
+          project_version="$(sed -nE 's/^[[:space:]]*project\(AgentPluginHost VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<< "$cmake_source")"
+          [[ "$project_version" == "$version" ]]
+
+          runs="$(gh api --paginate \
+            "repos/$GH_REPO/actions/runs?branch=main&event=push&head_sha=$target_sha&per_page=100" \
+            --jq '.workflow_runs[] | select(.name == "CI" and .path == ".github/workflows/ci.yml" and .head_branch == "main" and .head_sha == "'"$target_sha"'" and .event == "push" and .status == "completed" and .conclusion == "success") | [.id, .head_sha] | @tsv')"
+          [[ -n "$runs" ]]
+          [[ "$(wc -l <<< "$runs" | tr -d ' ')" == 1 ]]
+          IFS=$'\t' read -r run_id run_sha <<< "$runs"
+          [[ "$run_sha" == "$target_sha" ]]
+
+          {
+            printf 'run_id=%s\n' "$run_id"
+            printf 'source_sha=%s\n' "$target_sha"
+            printf 'tag=%s\n' "$TAG"
+            printf 'version=%s\n' "$version"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve exact artifact IDs
         id: artifacts
+        shell: bash
         env:
-          RUN_ID: ${{ steps.ci.outputs.run_id }}
+          RUN_ID: ${{ steps.source.outputs.run_id }}
         run: |
-          artifacts="$(gh api --method GET "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" -f per_page=100)"
-          mac_matches="$(jq '[.artifacts[] | select(.name == "AgentPluginHost-latest-macos-arm64" and .expired == false)]' <<< "$artifacts")"
-          win_matches="$(jq '[.artifacts[] | select(.name == "AgentPluginHost-latest-windows-x64" and .expired == false)]' <<< "$artifacts")"
-          if [[ "$(jq 'length' <<< "$mac_matches")" != 1 || "$(jq 'length' <<< "$win_matches")" != 1 ]]; then
-            echo "The exact CI run must contain one unexpired artifact for each release platform." >&2
-            exit 1
-          fi
-          echo "macos_id=$(jq -r '.[0].id' <<< "$mac_matches")" >> "$GITHUB_OUTPUT"
-          echo "windows_id=$(jq -r '.[0].id' <<< "$win_matches")" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          artifacts="$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | [.id, .name, .expired] | @tsv')"
+          [[ "$(wc -l <<< "$artifacts" | tr -d ' ')" == 2 ]]
 
-      - name: Download exact CI artifacts
+          macos_id="$(awk -F '\t' '$2 == "AgentPluginHost-latest-macos-universal" && $3 == "false" { print $1 }' <<< "$artifacts")"
+          windows_id="$(awk -F '\t' '$2 == "AgentPluginHost-latest-windows-x64" && $3 == "false" { print $1 }' <<< "$artifacts")"
+          [[ "$macos_id" =~ ^[0-9]+$ ]]
+          [[ "$windows_id" =~ ^[0-9]+$ ]]
+          [[ "$(wc -l <<< "$macos_id" | tr -d ' ')" == 1 ]]
+          [[ "$(wc -l <<< "$windows_id" | tr -d ' ')" == 1 ]]
+          printf 'macos_id=%s\nwindows_id=%s\n' "$macos_id" "$windows_id" >> "$GITHUB_OUTPUT"
+
+  sign-macos:
+    name: Sign and notarize macOS
+    needs: provenance
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download exact macOS artifact
+        shell: bash
         env:
-          MACOS_ID: ${{ steps.artifacts.outputs.macos_id }}
-          WINDOWS_ID: ${{ steps.artifacts.outputs.windows_id }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MACOS_ID: ${{ needs.provenance.outputs.macos_id }}
         run: |
-          mkdir -p candidates/macos candidates/windows dist
-          gh api "repos/$REPOSITORY/actions/artifacts/$MACOS_ID/zip" > candidates/macos.zip
-          gh api "repos/$REPOSITORY/actions/artifacts/$WINDOWS_ID/zip" > candidates/windows.zip
-          unzip -q candidates/macos.zip -d candidates/macos
-          unzip -q candidates/windows.zip -d candidates/windows
+          set -euo pipefail
+          mkdir -p artifacts/macos release-candidate
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$GH_REPO/actions/artifacts/$MACOS_ID/zip" > artifacts/macos.zip
+          unzip -q artifacts/macos.zip -d artifacts/macos
 
-      - name: Verify and assemble release
+      - name: Verify unsigned artifact checksum
+        shell: bash
         run: |
-          cd candidates/macos
-          sha256sum -c SHA256SUMS.txt
-          cd ../windows
-          sha256sum -c SHA256SUMS.txt
-          cd ../..
-          cp candidates/macos/AgentPluginHost-macos-arm64.zip dist/
-          cp candidates/windows/AgentPluginHost-windows-x64.zip dist/
-          unzip -t dist/AgentPluginHost-macos-arm64.zip
-          unzip -t dist/AgentPluginHost-windows-x64.zip
-          cd dist
-          sha256sum AgentPluginHost-macos-arm64.zip AgentPluginHost-windows-x64.zip > SHA256SUMS.txt
-          printf '%s\n' "$TAG" > VERSION.txt
-          test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+          set -euo pipefail
+          manifest='artifacts/macos/SHA256SUMS.txt'
+          zip_name='AgentPluginHost-macos-universal.zip'
+          [[ -f "artifacts/macos/$zip_name" ]]
+          [[ -f "$manifest" ]]
+          [[ "$(wc -l < "$manifest" | tr -d ' ')" == 1 ]]
+          line="$(cat "$manifest")"
+          [[ "$line" =~ ^[0-9a-f]{64}\ \ [A-Za-z0-9._-]+$ ]]
+          [[ "${line#*  }" == "$zip_name" ]]
+          expected_hash="${line%%  *}"
+          actual_hash="$(shasum -a 256 "artifacts/macos/$zip_name" | awk '{ print $1 }')"
+          [[ "$actual_hash" == "$expected_hash" ]]
+
+      - name: Prepare one-root signing payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/macos/signing-input/macos-universal
+          ditto -x -k artifacts/macos/AgentPluginHost-macos-universal.zip \
+            artifacts/macos/signing-input/macos-universal
+          [[ -d artifacts/macos/signing-input/macos-universal/app/agent_plugin_host.app ]]
+          [[ -L artifacts/macos/signing-input/macos-universal/scanner/agent_plugin_scanner ]]
+          ditto -c -k --sequesterRsrc --keepParent \
+            artifacts/macos/signing-input/macos-universal \
+            artifacts/macos/AgentPluginHost-signing-input.zip
+
+      - name: Sign, notarize, staple, and reverify
+        id: signing
+        uses: EsionHsrahLatigid/ehl-macos-signing-action@6164c267c8ce723d91cee4b6150d513cfe99b708
+        with:
+          product-name: AgentPluginHost
+          input-zip: artifacts/macos/AgentPluginHost-signing-input.zip
+          output-zip: artifacts/macos/AgentPluginHost-signed-rooted.zip
+          certificate-p12-base64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
+          apple-api-issuer-id: ${{ secrets.APPLE_API_ISSUER_ID }}
+          apple-api-private-key-p8-base64: ${{ secrets.APPLE_API_PRIVATE_KEY_P8_BASE64 }}
+
+      - name: Restore public archive layout and record checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/macos/signed-rooted
+          ditto -x -k artifacts/macos/AgentPluginHost-signed-rooted.zip \
+            artifacts/macos/signed-rooted
+          [[ "$(find artifacts/macos/signed-rooted -mindepth 1 -maxdepth 1 -print | wc -l | tr -d ' ')" == 1 ]]
+          root='artifacts/macos/signed-rooted/macos-universal'
+          [[ -d "$root" ]]
+          [[ -L "$root/scanner/agent_plugin_scanner" ]]
+          ditto -c -k --sequesterRsrc "$root" \
+            release-candidate/AgentPluginHost-macos-universal.zip
+          signed_sha256="$(shasum -a 256 release-candidate/AgentPluginHost-macos-universal.zip | awk '{ print $1 }')"
+          [[ "$signed_sha256" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  AgentPluginHost-macos-universal.zip\n' "$signed_sha256" \
+            > release-candidate/AgentPluginHost-macos-universal.zip.sha256
+
+      - name: Upload signed release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signed-macos-release-candidate
+          path: release-candidate/
+          if-no-files-found: error
+          retention-days: 1
+
+  prepare-windows:
+    name: Prepare Windows candidate
+    needs: provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download and verify exact Windows artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WINDOWS_ID: ${{ needs.provenance.outputs.windows_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/windows release-candidate
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$GH_REPO/actions/artifacts/$WINDOWS_ID/zip" > artifacts/windows.zip
+          unzip -q artifacts/windows.zip -d artifacts/windows
+          manifest='artifacts/windows/SHA256SUMS.txt'
+          zip_name='AgentPluginHost-windows-x64.zip'
+          [[ -f "artifacts/windows/$zip_name" ]]
+          [[ -f "$manifest" ]]
+          [[ "$(wc -l < "$manifest" | tr -d ' ')" == 1 ]]
+          line="$(cat "$manifest")"
+          [[ "$line" =~ ^[0-9a-f]{64}\ \ [A-Za-z0-9._-]+$ ]]
+          [[ "${line#*  }" == "$zip_name" ]]
+          (cd artifacts/windows && sha256sum --check --strict SHA256SUMS.txt)
+          cp "artifacts/windows/$zip_name" "release-candidate/$zip_name"
+          unzip -t "release-candidate/$zip_name"
+          (cd release-candidate && sha256sum "$zip_name" > "${zip_name}.sha256")
+
+      - name: Upload Windows release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-release-candidate
+          path: release-candidate/
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-signed-macos:
+    name: Verify signed macOS candidate
+    needs:
+      - provenance
+      - sign-macos
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download signed macOS candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-macos-release-candidate
+          path: candidate
+
+      - name: Verify archive, signatures, notarization, and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate && shasum -a 256 -c AgentPluginHost-macos-universal.zip.sha256)
+          mkdir verify
+          ditto -x -k candidate/AgentPluginHost-macos-universal.zip verify
+          root='verify'
+
+          app="$root/app/agent_plugin_host.app"
+          scanner="$root/scanner/agent_plugin_scanner"
+          helper="$app/Contents/Helpers/agent_plugin_scanner"
+          gain_vst3="$root/fixtures/aph_test_gain.vst3"
+          synth_vst3="$root/fixtures/aph_test_synth.vst3"
+          gain_au="$root/fixtures/aph_test_gain.component"
+          synth_au="$root/fixtures/aph_test_synth.component"
+          bundles=("$app" "$gain_vst3" "$synth_vst3" "$gain_au" "$synth_au")
+
+          [[ -d "$app" && -x "$helper" ]]
+          [[ -L "$scanner" ]]
+          [[ "$(readlink "$scanner")" == '../app/agent_plugin_host.app/Contents/Helpers/agent_plugin_scanner' ]]
+          [[ -x "$scanner" ]]
+          [[ "$(find "$root" -type d -name '*.app' | wc -l | tr -d ' ')" == 1 ]]
+          [[ "$(find "$root" -type d -name '*.vst3' | wc -l | tr -d ' ')" == 2 ]]
+          [[ "$(find "$root" -type d -name '*.component' | wc -l | tr -d ' ')" == 2 ]]
+
+          verify_signature() {
+            local path="$1"
+            local details
+            codesign --verify --strict --verbose=2 "$path"
+            details="$(codesign -d --verbose=4 "$path" 2>&1)"
+            grep -Fq 'Authority=Developer ID Application:' <<< "$details"
+            grep -Fq 'TeamIdentifier=RS3AQSY9YN' <<< "$details"
+            grep -Eq '^Timestamp=' <<< "$details"
+            grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$details"
+            if codesign -d --entitlements :- "$path" 2>/dev/null \
+              | grep -Fq '<key>com.apple.security.get-task-allow</key>'; then
+              echo "Debug entitlement found in $path" >&2
+              return 1
+            fi
+          }
+
+          for bundle in "${bundles[@]}"; do
+            codesign --verify --deep --strict --verbose=2 "$bundle"
+            verify_signature "$bundle"
+            xcrun stapler validate "$bundle"
+          done
+          verify_signature "$helper"
+          verify_signature "$scanner"
+          spctl --assess --type execute --verbose=4 "$app"
+          spctl --assess --type execute --verbose=4 "$scanner"
+
+          "$scanner" "$gain_vst3" > verify/scanner-result.json
+          jq -e '.passed == true
+                 and (.plugins | length) == 1
+                 and .plugins[0].format == "VST3"' verify/scanner-result.json >/dev/null
+
+          binaries=(
+            "$app/Contents/MacOS/AgentPluginHost"
+            "$helper"
+            "$gain_vst3/Contents/MacOS/APH Test Gain"
+            "$synth_vst3/Contents/MacOS/APH Test Synth"
+            "$gain_au/Contents/MacOS/APH Test Gain"
+            "$synth_au/Contents/MacOS/APH Test Synth"
+          )
+          for binary in "${binaries[@]}"; do
+            archs="$(lipo -archs "$binary")"
+            [[ "$(wc -w <<< "$archs" | tr -d ' ')" == 2 ]]
+            [[ " $archs " == *' arm64 '* ]]
+            [[ " $archs " == *' x86_64 '* ]]
+          done
+
+  publish:
+    name: Publish verified release
+    needs:
+      - provenance
+      - sign-macos
+      - prepare-windows
+      - verify-signed-macos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.provenance.outputs.tag }}
+    steps:
+      - name: Download signed macOS candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-macos-release-candidate
+          path: release-candidates
+
+      - name: Download Windows candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-release-candidate
+          path: release-candidates
+
+      - name: Assemble and verify exact asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(find release-candidates -maxdepth 1 -type f | wc -l | tr -d ' ')" == 4 ]]
+          (cd release-candidates && sha256sum --check --strict AgentPluginHost-macos-universal.zip.sha256)
+          (cd release-candidates && sha256sum --check --strict AgentPluginHost-windows-x64.zip.sha256)
+          unzip -t release-candidates/AgentPluginHost-macos-universal.zip
+          unzip -t release-candidates/AgentPluginHost-windows-x64.zip
+          (
+            cd release-candidates
+            sha256sum AgentPluginHost-macos-universal.zip AgentPluginHost-windows-x64.zip > SHA256SUMS.txt
+            printf '%s\n' "$TAG" > VERSION.txt
+            rm AgentPluginHost-macos-universal.zip.sha256 AgentPluginHost-windows-x64.zip.sha256
+          )
+          [[ "$(find release-candidates -maxdepth 1 -type f | wc -l | tr -d ' ')" == 4 ]]
 
       - name: Create or repair fail-closed draft release
+        shell: bash
         run: |
+          set -euo pipefail
           assets=(
-            dist/AgentPluginHost-macos-arm64.zip
-            dist/AgentPluginHost-windows-x64.zip
-            dist/SHA256SUMS.txt
-            dist/VERSION.txt
+            release-candidates/AgentPluginHost-macos-universal.zip
+            release-candidates/AgentPluginHost-windows-x64.zip
+            release-candidates/SHA256SUMS.txt
+            release-candidates/VERSION.txt
           )
+          expected='["AgentPluginHost-macos-universal.zip","AgentPluginHost-windows-x64.zip","SHA256SUMS.txt","VERSION.txt"]'
           if release="$(gh release view "$TAG" --json isDraft,assets 2>/dev/null)"; then
-            if [[ "$(jq -r '.isDraft' <<< "$release")" != true ]]; then
-              echo "Release $TAG is already published; refusing to replace it." >&2
-              exit 1
-            fi
-            unexpected="$(jq -r '[.assets[].name] - ["AgentPluginHost-macos-arm64.zip", "AgentPluginHost-windows-x64.zip", "SHA256SUMS.txt", "VERSION.txt"] | length' <<< "$release")"
-            if [[ "$unexpected" != 0 ]]; then
-              echo "Existing draft contains unexpected assets; refusing automatic repair." >&2
+            [[ "$(jq -r '.isDraft' <<< "$release")" == true ]]
+            existing="$(jq -c '[.assets[].name] | sort' <<< "$release")"
+            if [[ "$existing" != '[]' && "$existing" != "$expected" ]]; then
+              echo "Existing draft contains an unexpected asset set: $existing" >&2
               exit 1
             fi
             gh release upload "$TAG" "${assets[@]}" --clobber
           else
             gh release create "$TAG" "${assets[@]}" \
-              --draft \
-              --verify-tag \
-              --generate-notes \
-              --title "AgentPluginHost $TAG"
+              --draft --verify-tag --generate-notes --title "AgentPluginHost $TAG"
           fi
+          actual="$(gh release view "$TAG" --json assets --jq '[.assets[].name] | sort')"
+          [[ "$actual" == "$expected" ]]
 
-      - name: Verify exact release asset set
+      - name: Verify uploaded assets and publish
+        shell: bash
         run: |
-          assets="$(gh release view "$TAG" --json assets --jq '[.assets[].name] | sort')"
-          expected='["AgentPluginHost-macos-arm64.zip","AgentPluginHost-windows-x64.zip","SHA256SUMS.txt","VERSION.txt"]'
-          if [[ "$assets" != "$expected" ]]; then
-            echo "Unexpected draft asset set: $assets" >&2
-            exit 1
-          fi
-
-      - name: Publish verified release
-        run: gh release edit "$TAG" --draft=false
+          set -euo pipefail
+          mkdir published-assets
+          gh release download "$TAG" --dir published-assets
+          [[ "$(find published-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" == 4 ]]
+          (cd published-assets && sha256sum --check --strict SHA256SUMS.txt)
+          [[ "$(tr -d '[:space:]' < published-assets/VERSION.txt)" == "$TAG" ]]
+          unzip -t published-assets/AgentPluginHost-macos-universal.zip
+          unzip -t published-assets/AgentPluginHost-windows-x64.zip
+          gh release edit "$TAG" --draft=false

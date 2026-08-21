@@ -63,10 +63,10 @@ done
 kernel="$(uname -s)"
 machine="$(uname -m)"
 case "${kernel}-${machine}" in
-  Darwin-arm64) platform="macos-arm64" ;;
+  Darwin-arm64|Darwin-x86_64) platform="macos-universal" ;;
   *)
     echo "Unsupported AgentPluginHost platform: ${kernel}-${machine}." >&2
-    echo "Release binaries are available for macos-arm64 and windows-x64." >&2
+    echo "Release binaries are available for macos-universal and windows-x64." >&2
     exit 2
     ;;
 esac
@@ -134,7 +134,7 @@ fi
 release_dir="${cache_root}/releases/${requested_version}/${platform}"
 install_dir="${release_dir}/install"
 case "$platform" in
-  macos-arm64) relative_executable="app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost" ;;
+  macos-universal) relative_executable="app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost" ;;
 esac
 host_executable="${install_dir}/${relative_executable}"
 install_marker="${release_dir}/INSTALL.txt"
@@ -203,7 +203,7 @@ if [[ "$cache_is_valid" -eq 0 || "$reinstall" -eq 1 ]]; then
   chmod +x "$candidate"
   scanner="${work_dir}/install/scanner/agent_plugin_scanner"
   [[ ! -f "$scanner" ]] || chmod +x "$scanner"
-  if [[ "$platform" == macos-arm64 ]] && command -v codesign >/dev/null 2>&1; then
+  if [[ "$platform" == macos-universal ]] && command -v codesign >/dev/null 2>&1; then
     codesign --verify --deep --strict "${work_dir}/install/app/agent_plugin_host.app"
   fi
 

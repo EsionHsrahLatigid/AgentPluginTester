@@ -8,7 +8,7 @@ trap cleanup EXIT
 
 version="v0.1.0"
 release_root="${test_root}/releases"
-asset_name="AgentPluginHost-macos-arm64.zip"
+asset_name="AgentPluginHost-macos-universal.zip"
 payload="${test_root}/payload"
 executable="${payload}/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost"
 mkdir -p "$(dirname "$executable")" "${release_root}/latest/download" "${release_root}/download/${version}"
@@ -37,7 +37,7 @@ printf '%s  %s\n' "$asset_hash" "$asset_name" > "${release_root}/download/${vers
 cache_root="${test_root}/cache"
 resolved="$(AGENT_PLUGIN_TESTER_RELEASE_BASE_URL="$release_root" "$launcher" --cache-dir "$cache_root" --print-host-path)"
 [[ -x "$resolved" ]]
-[[ "$resolved" == *"/releases/${version}/macos-arm64/install/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost" ]]
+[[ "$resolved" == *"/releases/${version}/macos-universal/install/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost" ]]
 
 offline_resolved="$(AGENT_PLUGIN_TESTER_RELEASE_BASE_URL="${test_root}/missing" "$launcher" --cache-dir "$cache_root" --offline --print-host-path)"
 [[ "$offline_resolved" == "$resolved" ]]

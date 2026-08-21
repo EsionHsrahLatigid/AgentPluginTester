@@ -1,6 +1,6 @@
 # Agent Plugin Test Host 仕様書
 
-- 文書バージョン: 0.2.0
+- 文書バージョン: 0.3.0
 - 作成日: 2026-08-12
 - ステータス: 実装済み仕様（macOS AUv2拡張を含む）
 - 仮称: **AgentPluginHost**
@@ -21,7 +21,7 @@ AgentPluginHostは、AIエージェントおよび人間の開発者がVST3お�
 
 | 項目 | macOS | Windows |
 | --- | --- | --- |
-| CPU | Apple Silicon必須、Intelは任意 | x64必須、ARM64は将来対応 |
+| CPU | arm64 / x86_64 universal 2必須 | x64必須、ARM64は将来対応 |
 | OS | macOS 13以降を初期対象 | Windows 10 22H2 / Windows 11 |
 | プラグイン形式 | VST3、AUv2 `.component` | VST3 |
 | AudioUnit | AUv2対応、AUv3対象外 | 対象外 |

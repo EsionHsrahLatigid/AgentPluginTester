@@ -15,7 +15,7 @@ Resolve paths relative to the directory containing this `SKILL.md`, then use:
 <skill-directory>/scripts/agent-plugin-tester --version
 ```
 
-On Windows use `scripts/agent-plugin-tester.ps1`. On the first run, the launcher downloads the matching macOS arm64 or Windows x64 ZIP from the latest public GitHub Release, verifies its SHA-256 entry, and installs it in the user cache. Later runs use the cache without network access.
+On Windows use `scripts/agent-plugin-tester.ps1`. On the first run, the launcher downloads the matching macOS universal 2 or Windows x64 ZIP from the latest public GitHub Release, verifies its SHA-256 entry, and installs it in the user cache. Later runs use the cache without network access.
 
 Resolver controls:
 
@@ -27,13 +27,13 @@ Resolver controls:
 <skill-directory>/scripts/agent-plugin-tester --update --version
 
 # Pin a reproducible release or require an existing offline cache
-<skill-directory>/scripts/agent-plugin-tester --host-version v0.2.0 --offline --version
+<skill-directory>/scripts/agent-plugin-tester --host-version v0.3.0 --offline --version
 
 # Print the real executable path
 <skill-directory>/scripts/agent-plugin-tester --print-host-path
 ```
 
-`v0.2.0` is the current exact public release and is VST3-only. AUv2 support is implemented in source version `0.3.0`; use a source build until a signed `v0.3.0` release is published. Never bypass a checksum failure. Set `AGENT_PLUGIN_TESTER_CACHE_DIR` only when a task needs an isolated cache. Use `AGENT_PLUGIN_TESTER_RELEASE_BASE_URL` only for a trusted mirror or downloader tests.
+`v0.3.0` is the release documented by this skill and supports VST3 on macOS and Windows plus AUv2 on macOS. The pinned command requires that release to exist and already be cached when `--offline` is present. Never bypass a checksum failure. Set `AGENT_PLUGIN_TESTER_CACHE_DIR` only when a task needs an isolated cache. Use `AGENT_PLUGIN_TESTER_RELEASE_BASE_URL` only for a trusted mirror or downloader tests.
 
 ## Build from source when needed
 
@@ -61,7 +61,7 @@ Pass `-DEHL_JUCE_SOURCE_DIR=/absolute/path/to/JUCE` at configure time to avoid f
 
 Use the staged artifact, not a generator-specific build path:
 
-- macOS: `artifacts/host-release/macos-arm64/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost`
+- macOS: `artifacts/host-release/macos-universal/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost`
 - Windows: `artifacts/host-release/windows-x64/app/agent_plugin_host.exe`
 - Linux: `artifacts/host-release/linux-x64/app/agent_plugin_host`
 

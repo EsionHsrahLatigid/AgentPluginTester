@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  macos-arm64:
-    name: macOS arm64 host
+  macos-universal:
+    name: macOS universal host
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -36,26 +36,44 @@ jobs:
 
       - name: Verify staged signatures
         run: |
-          codesign --verify --deep --strict artifacts/host-release/macos-arm64/app/agent_plugin_host.app
-          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_gain.vst3
-          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_synth.vst3
-          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_gain.component
-          codesign --verify --deep --strict artifacts/host-release/macos-arm64/fixtures/aph_test_synth.component
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/app/agent_plugin_host.app
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/scanner/agent_plugin_scanner
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/fixtures/aph_test_gain.vst3
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/fixtures/aph_test_synth.vst3
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/fixtures/aph_test_gain.component
+          codesign --verify --deep --strict artifacts/host-release/macos-universal/fixtures/aph_test_synth.component
+
+      - name: Verify universal architecture slices
+        run: |
+          binaries=(
+            artifacts/host-release/macos-universal/app/agent_plugin_host.app/Contents/MacOS/AgentPluginHost
+            artifacts/host-release/macos-universal/app/agent_plugin_host.app/Contents/Helpers/agent_plugin_scanner
+            "artifacts/host-release/macos-universal/fixtures/aph_test_gain.vst3/Contents/MacOS/APH Test Gain"
+            "artifacts/host-release/macos-universal/fixtures/aph_test_synth.vst3/Contents/MacOS/APH Test Synth"
+            "artifacts/host-release/macos-universal/fixtures/aph_test_gain.component/Contents/MacOS/APH Test Gain"
+            "artifacts/host-release/macos-universal/fixtures/aph_test_synth.component/Contents/MacOS/APH Test Synth"
+          )
+          for binary in "${binaries[@]}"; do
+            archs="$(lipo -archs "$binary")"
+            test "$(wc -w <<< "$archs" | tr -d ' ')" = 2
+            [[ " $archs " == *' arm64 '* ]]
+            [[ " $archs " == *' x86_64 '* ]]
+          done
 
       - name: Package release asset
         run: |
           mkdir -p dist
-          ditto -c -k --sequesterRsrc artifacts/host-release/macos-arm64 dist/AgentPluginHost-macos-arm64.zip
-          unzip -t dist/AgentPluginHost-macos-arm64.zip
+          ditto -c -k --sequesterRsrc artifacts/host-release/macos-universal dist/AgentPluginHost-macos-universal.zip
+          unzip -t dist/AgentPluginHost-macos-universal.zip
           cd dist
-          shasum -a 256 AgentPluginHost-macos-arm64.zip > SHA256SUMS.txt
+          shasum -a 256 AgentPluginHost-macos-universal.zip > SHA256SUMS.txt
 
       - name: Upload release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: AgentPluginHost-latest-macos-arm64
+          name: AgentPluginHost-latest-macos-universal
           path: |
-            dist/AgentPluginHost-macos-arm64.zip
+            dist/AgentPluginHost-macos-universal.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
@@ -110,12 +128,12 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [macos-arm64, windows-x64]
+    needs: [macos-universal, windows-x64]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all release candidates
         env:
-          MACOS_RESULT: ${{ needs.macos-arm64.result }}
+          MACOS_RESULT: ${{ needs.macos-universal.result }}
           WINDOWS_RESULT: ${{ needs.windows-x64.result }}
         run: |
           test "$MACOS_RESULT" = success

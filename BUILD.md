@@ -27,13 +27,13 @@ The release preset stages platform-normalized products under `artifacts/host-rel
 
 ## CI and releases
 
-The GitHub Actions CI follows the fail-closed artifact pattern used by `EsionHsrahLatigid/juce-ci`: macOS arm64 and Windows x64 build, test, stage, package, checksum, and upload independently. The release workflow accepts only a semantic-version tag that matches `project(AgentPluginHost VERSION ...)`, resolves exactly one successful `main` CI run for the tagged commit, verifies both candidate checksums, and promotes those exact artifacts without rebuilding.
+The GitHub Actions CI follows the fail-closed artifact pattern used by `EsionHsrahLatigid/juce-ci`: macOS universal 2 (arm64 + x86_64) and Windows x64 build, test, stage, package, checksum, and upload independently. The release workflow accepts only a semantic-version tag that matches `project(AgentPluginHost VERSION ...)`, resolves exactly one successful `main` CI run for the tagged commit, verifies both candidate checksums, and promotes those exact artifacts without rebuilding.
 
 A published release contains exactly:
 
-- `AgentPluginHost-macos-arm64.zip`
+- `AgentPluginHost-macos-universal.zip`
 - `AgentPluginHost-windows-x64.zip`
 - `SHA256SUMS.txt`
 - `VERSION.txt`
 
-To publish a release, update the CMake project version, land the commit on `main`, wait for CI to pass, then push the matching tag (for example `v0.2.0`).
+To publish a release, update the CMake project version, land the commit on `main`, wait for CI to pass, then push the matching tag (for example `v0.3.0`).

@@ -8,7 +8,7 @@ juce::File stagedGainFixture()
 {
     auto root = juce::File (APH_SOURCE_DIR).getChildFile ("artifacts/host-release");
    #if JUCE_MAC
-    return root.getChildFile ("macos-arm64/fixtures/aph_test_gain.vst3");
+    return root.getChildFile ("macos-universal/fixtures/aph_test_gain.vst3");
    #elif JUCE_WINDOWS
     return root.getChildFile ("windows-x64/fixtures/aph_test_gain.vst3");
    #else

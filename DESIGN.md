@@ -115,4 +115,4 @@ The `AgentPluginHost` JUCE GUI target compiles these files and opens `HostMainWi
 
 The design was cross-checked against the existing Canva direction `EHL / Plugins / 8-bit UI Template` (design ID `DAHSB2E1xQE`). Brand-template enumeration was unavailable under the connected Canva plan, so the implementation uses the established code-native EHL system rather than introducing an unverified logo treatment.
 
-Release binaries are not stored inside the repository skill. The macOS arm64 and Windows x64 skill launchers resolve platform ZIPs from immutable GitHub Releases, verify `SHA256SUMS.txt`, and execute from a versioned user cache.
+Release binaries are not stored inside the repository skill. The macOS universal 2 and Windows x64 skill launchers resolve platform ZIPs from immutable GitHub Releases, verify `SHA256SUMS.txt`, and execute from a versioned user cache.

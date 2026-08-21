@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
 
+if(CMAKE_HOST_APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum supported macOS version")
+endif()
+
 project(AgentPluginHost VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum supported macOS version")
 
 option(AGENTPLUGINHOST_BUILD_APP "Build the AgentPluginHost app and scanner" ON)
 option(AGENTPLUGINHOST_BUILD_TESTS "Build unit tests and fixture plug-ins" ON)
@@ -181,7 +184,7 @@ endif()
 if(AGENTPLUGINHOST_BUILD_APP AND AGENTPLUGINHOST_BUILD_TESTS)
     set(ehl_stage_platform "linux-x64")
     if(APPLE)
-        set(ehl_stage_platform "macos-arm64")
+        set(ehl_stage_platform "macos-universal")
     elseif(WIN32)
         set(ehl_stage_platform "windows-x64")
     endif()
@@ -201,7 +204,9 @@ if(AGENTPLUGINHOST_BUILD_APP AND AGENTPLUGINHOST_BUILD_TESTS)
     if(APPLE)
         list(APPEND ehl_stage_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_app_products}/AgentPluginHost.app" "${ehl_stage_dir}/app/agent_plugin_host.app"
-            COMMAND ${CMAKE_COMMAND} -E copy "${ehl_scanner_products}/AgentPluginScanner" "${ehl_stage_dir}/scanner/agent_plugin_scanner"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${ehl_stage_dir}/app/agent_plugin_host.app/Contents/Helpers"
+            COMMAND ${CMAKE_COMMAND} -E copy "${ehl_scanner_products}/AgentPluginScanner" "${ehl_stage_dir}/app/agent_plugin_host.app/Contents/Helpers/agent_plugin_scanner"
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "../app/agent_plugin_host.app/Contents/Helpers/agent_plugin_scanner" "${ehl_stage_dir}/scanner/agent_plugin_scanner"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_gain_products}/VST3/APH Test Gain.vst3" "${ehl_stage_dir}/fixtures/aph_test_gain.vst3"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_synth_products}/VST3/APH Test Synth.vst3" "${ehl_stage_dir}/fixtures/aph_test_synth.vst3"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${ehl_gain_products}/AU/APH Test Gain.component" "${ehl_stage_dir}/fixtures/aph_test_gain.component"
