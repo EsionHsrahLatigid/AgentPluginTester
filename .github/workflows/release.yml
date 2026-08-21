@@ -223,10 +223,12 @@ jobs:
           [[ -f "artifacts/windows/$zip_name" ]]
           [[ -f "$manifest" ]]
           [[ "$(wc -l < "$manifest" | tr -d ' ')" == 1 ]]
-          line="$(cat "$manifest")"
+          line="$(tr -d '\r' < "$manifest")"
           [[ "$line" =~ ^[0-9a-f]{64}\ \ [A-Za-z0-9._-]+$ ]]
           [[ "${line#*  }" == "$zip_name" ]]
-          (cd artifacts/windows && sha256sum --check --strict SHA256SUMS.txt)
+          expected_hash="${line%%  *}"
+          actual_hash="$(sha256sum "artifacts/windows/$zip_name" | awk '{ print $1 }')"
+          [[ "$actual_hash" == "$expected_hash" ]]
           cp "artifacts/windows/$zip_name" "release-candidate/$zip_name"
           unzip -t "release-candidate/$zip_name"
           (cd release-candidate && sha256sum "$zip_name" > "${zip_name}.sha256")
